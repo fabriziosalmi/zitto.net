@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Collective</title>
+    <meta name="theme-color" content="#000000">
     <style>
         * {
             margin: 0;
@@ -31,7 +32,7 @@
         }
 
         .collective-counter {
-            font-size: 8rem;
+            font-size: clamp(4rem, 12vw, 10rem);
             font-weight: bold;
             color: #222;
             text-align: center;
@@ -51,12 +52,19 @@
         }
 
         .connection-status {
-            font-size: 0.9rem;
-            color: #777;
             position: absolute;
             bottom: 2rem;
             left: 2rem;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+            box-shadow: 0 0 10px rgba(255,255,255,0.08);
         }
+        .connection-status.connected { background: #2ecc71; animation: dotPulse 2.2s ease-in-out infinite; }
+        @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.35);} 50% { box-shadow: 0 0 0 12px rgba(46,204,113,0); } }
+        .connection-status.reconnecting { background: #f1c40f; }
+        .connection-status.disconnected { background: #7f8c8d; }
 
         .milestones {
             position: absolute;
@@ -132,30 +140,127 @@
             font-size: 0.9rem;
         }
 
+        :root {
+            --breath-duration: 5000ms;
+            --glow: 0 0 40px rgba(255,255,255,0.04);
+        }
+
+        .bg-canvas,
+        .fx-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container { z-index: 2; }
+        .milestones { z-index: 2; }
+        .connection-status { z-index: 2; }
+        #evolution-flash { z-index: 3; }
+
+        .aura {
+            position: absolute;
+            width: clamp(220px, 35vw, 520px);
+            height: clamp(220px, 35vw, 520px);
+            border-radius: 50%;
+            background: radial-gradient( circle at 50% 50%, rgba(255,255,255,0.06), rgba(255,255,255,0) 60% );
+            filter: blur(6px) hue-rotate(var(--hue, 0deg));
+            animation: breathe var(--breath-duration) ease-in-out infinite;
+            transform-origin: center;
+            mix-blend-mode: screen;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(0.96); opacity: 0.7; }
+            50% { transform: scale(1.04); opacity: 1; }
+        }
+
+        .collective-counter { text-shadow: var(--glow); }
+        .status { text-shadow: 0 0 20px rgba(255,255,255,0.03); }
+
+        .milestone { box-shadow: 0 0 0 1px #222, 0 10px 30px rgba(0,0,0,0.35); }
+        .milestone.new { outline: 1px solid rgba(255,255,255,0.07); }
+
+        .whispers {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #444;
+            font-size: 0.9rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            opacity: 0.8;
+            pointer-events: none;
+        }
+
+        .whispers { opacity: 0; pointer-events: none; }
+
+        /* Minimal help overlay, hidden by default */
+        .hud {
+            position: absolute;
+            top: 1.25rem;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #555;
+            background: rgba(0,0,0,0.6);
+            border: 1px solid #222;
+            border-radius: 6px;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.75rem;
+            letter-spacing: 0.04em;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        }
+
+        /* Smooth fade for non-essential UI on idle */
+        .milestones, .peak, .connection-status, .total-time { transition: opacity .8s ease; }
+        body.ui-fade .milestones,
+        body.ui-fade .peak,
+        body.ui-fade .connection-status,
+        body.ui-fade .total-time { opacity: 0; }
+
+        /* Counter pulse on evolution */
+        @keyframes counterPulse { 0%{ transform: scale(1); text-shadow: var(--glow);} 50%{ transform: scale(1.06); text-shadow: 0 0 60px rgba(255,255,255,0.12);} 100%{ transform: scale(1); text-shadow: var(--glow);} }
+        .collective-counter.pulse { animation: counterPulse 900ms ease-out; }
+
+        /* Aura focus (hold space) */
+        .aura.focus { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.12), rgba(255,255,255,0) 60%); filter: blur(5px) hue-rotate(var(--hue, 0deg)); }
+
         @media (prefers-reduced-motion: reduce) {
             .milestone { animation: none !important; transform: none !important; }
             .evolution-flash.active { animation: none !important; }
+            .aura { animation: none !important; }
             * { scroll-behavior: auto; }
         }
     </style>
 </head>
 <body>
+    <canvas class="bg-canvas" id="bg-canvas" aria-hidden="true"></canvas>
+    <canvas class="fx-canvas" id="fx-canvas" aria-hidden="true"></canvas>
     <div class="evolution-flash" id="evolution-flash"></div>
     
-    <div class="peak" id="peak">Peak: --</div>
-
     <div class="container">
+        <div class="aura" id="aura" aria-hidden="true"></div>
         <div class="collective-counter" id="counter" role="status" aria-live="polite" aria-atomic="true" aria-label="Concurrent connections">---</div>
-        <div class="status" id="status">COLLECTIVE AWAKENING...</div>
-        <div class="total-time" id="total-time" role="status" aria-live="polite" aria-atomic="true" aria-label="Total experience">Total Experience: --- seconds</div>
+        <div class="status" id="status"></div>
+        <div class="total-time" id="total-time" role="status" aria-live="polite" aria-atomic="true" aria-label="Total experience">—</div>
     </div>
 
-    <div class="connection-status" id="connection-status">
-        Connecting to The Collective...
-    </div>
+    <div class="connection-status" id="connection-status" aria-label="Connection status" title="Connecting"></div>
+
+    <div class="peak" id="peak">▲ --</div>
 
     <div class="milestones" id="milestones">
         <!-- Evolution events will appear here -->
+    </div>
+
+    <div class="whispers" id="whispers" aria-hidden="true"></div>
+
+    <!-- Minimal help overlay (toggle with ?) -->
+    <div id="hud" class="hud" hidden>
+        ? help · u ui · r sky · m motion · p peak · t time · g geo · o geometry · n moon · s sound · f fullscreen
     </div>
 
     <script>
@@ -169,7 +274,12 @@
                 this.isConnected = false;
                 this.heartbeatInterval = null;
                 this.heartbeatMs = 25000;
-                
+                this.joinRef = null;
+
+                this.prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                this.counterValue = 0;
+                this.counterRaf = null;
+
                 this.elements = {
                     counter: document.getElementById('counter'),
                     status: document.getElementById('status'),
@@ -177,297 +287,612 @@
                     milestones: document.getElementById('milestones'),
                     evolutionFlash: document.getElementById('evolution-flash'),
                     totalTime: document.getElementById('total-time'),
-                    peak: document.getElementById('peak')
+                    peak: document.getElementById('peak'),
+                    aura: document.getElementById('aura'),
+                    whispers: document.getElementById('whispers'),
+                    bgCanvas: document.getElementById('bg-canvas'),
+                    fxCanvas: document.getElementById('fx-canvas'),
                 };
 
-                this.counterValue = 0;
-                this.counterRaf = null;
-                this.prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                this.ctx = this.elements.bgCanvas.getContext('2d', { alpha: true });
+                this.fx = this.elements.fxCanvas.getContext('2d', { alpha: true });
+                this.stars = [];
+                this.constellations = [];
+
+                this.geo = { enabled: false, lat: 0, lon: 0 };
+                this.useRealSky = false;
+                // Small bright star catalog (RA hours, Dec deg, mag)
+                this.realStarsCatalog = [
+                    { n:'Sirius', ra:6.7525, dec:-16.7161, mag:-1.46 },
+                    { n:'Canopus', ra:6.3992, dec:-52.6957, mag:-0.74 },
+                    { n:'Arcturus', ra:14.2610, dec:19.1825, mag:-0.05 },
+                    { n:'Vega', ra:18.6156, dec:38.7837, mag:0.03 },
+                    { n:'Capella', ra:5.2782, dec:45.9979, mag:0.08 },
+                    { n:'Rigel', ra:5.2423, dec:-8.2016, mag:0.18 },
+                    { n:'Procyon', ra:7.6550, dec:5.2250, mag:0.38 },
+                    { n:'Achernar', ra:1.6286, dec:-57.2367, mag:0.46 },
+                    { n:'Betelgeuse', ra:5.9195, dec:7.4070, mag:0.50 },
+                    { n:'Hadar', ra:14.0637, dec:-60.3730, mag:0.61 },
+                    { n:'Altair', ra:19.8464, dec:8.8683, mag:0.77 },
+                    { n:'Acrux', ra:12.4433, dec:-63.0991, mag:0.77 },
+                    { n:'Aldebaran', ra:4.5987, dec:16.5093, mag:0.85 },
+                    { n:'Spica', ra:13.4199, dec:-11.1614, mag:0.97 },
+                    { n:'Antares', ra:16.4901, dec:-26.4319, mag:1.06 },
+                    { n:'Pollux', ra:7.7553, dec:28.0262, mag:1.14 },
+                    { n:'Fomalhaut', ra:22.9608, dec:-29.6222, mag:1.16 },
+                    { n:'Deneb', ra:20.6905, dec:45.2803, mag:1.25 },
+                    { n:'Mimosa', ra:12.7953, dec:-59.6888, mag:1.25 },
+                    { n:'Regulus', ra:10.1395, dec:11.9672, mag:1.35 },
+                    { n:'Adhara', ra:6.9771, dec:-28.9721, mag:1.50 },
+                    { n:'Shaula', ra:17.5601, dec:-37.1038, mag:1.62 },
+                    { n:'Castor', ra:7.5767, dec:31.8883, mag:1.58 },
+                    { n:'Gacrux', ra:12.5194, dec:-57.1132, mag:1.63 }
+                ];
+
+                // Preferences & API
+                this.prefs = {
+                    ui: 'full',      // full|min|none
+                    sky: 'auto',     // auto|real|proc
+                    aura: true,
+                    milestones: true,
+                    peak: true,
+                    time: true,
+                    motion: this.prefersReducedMotion ? 'reduce' : 'on',
+                    geometry: false,
+                    moon: false,
+                    sound: false,
+                    fullscreen: false,
+                    embers: true,    // Presence embers
+                };
+                this.loadPrefs();
+                this.applyPrefsFromURL();
+                this.applyPrefs();
+                this.bindKeyboard();
+                this.bindIdle();
+                this.bindParallax();
+                this.initProgrammaticAPI();
+
+                this.setupCanvases();
+                this.initStars();
+                this.animateBackground();
+                this.rotateWhispers();
 
                 this.connect();
+                this.initGeolocation();
+                window.addEventListener('resize', () => {
+                    this.setupCanvases();
+                    if (!this.useRealSky) this.initStars();
+                });
+            }
+
+            setupCanvases() {
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                for (const c of [this.elements.bgCanvas, this.elements.fxCanvas]) {
+                    c.width = Math.floor(window.innerWidth * dpr);
+                    c.height = Math.floor(window.innerHeight * dpr);
+                    c.style.width = '100vw';
+                    c.style.height = '100vh';
+                }
+                this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                this.fx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                // Track last draw for visibility throttling
+                this._lastDrawAt = 0; // visibility throttling
+                this._avgDt = 0;      // adaptive pacing
+                this._lastAdjust = 0; // adaptive star density
+            }
+
+            initStars() {
+                const count = Math.floor(Math.min(160, (window.innerWidth * window.innerHeight) / 25000));
+                this.stars = Array.from({length: count}).map(() => ({
+                    x: Math.random() * window.innerWidth,
+                    y: Math.random() * window.innerHeight,
+                    r: Math.random() * 1.4 + 0.3,
+                    a: Math.random() * Math.PI * 2,
+                    s: 0.5 + Math.random() * 0.8
+                }));
+            }
+
+            animateBackground() {
+                let last = 0;
+                const step = (now) => {
+                    const reduced = this.prefersReducedMotion || this.prefs.motion === 'reduce';
+                    // Throttle when tab not visible
+                    if (document.hidden && now - (this._lastDrawAt || 0) < (reduced ? 1000 : 500)) { requestAnimationFrame(step); return; }
+                    const dt = now - last;
+                    const minFrame = reduced ? 1000/5 : 1000/30; // 5fps vs 30fps
+                    if (dt < minFrame) { requestAnimationFrame(step); return; }
+                    last = now;
+                    this._lastDrawAt = now;
+                    this._avgDt = this._avgDt ? (this._avgDt * 0.9 + dt * 0.1) : dt;
+
+                    const hue = ((now / 100) % 360) | 0;
+                    if (this.elements.aura) this.elements.aura.style.setProperty('--hue', `${hue}deg`);
+
+                    const ctx = this.ctx;
+                    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+                    // Parallaxed gradient haze
+                    const px = this._parallax.x, py = this._parallax.y;
+                    const hx = window.innerWidth*0.7 + (reduced ? 0 : px * 40);
+                    const hy = window.innerHeight*0.3 + (reduced ? 0 : py * 30);
+                    const g = ctx.createRadialGradient(
+                        hx, hy, 50,
+                        window.innerWidth*0.5, window.innerHeight*0.6, Math.max(window.innerWidth, window.innerHeight)
+                    );
+                    g.addColorStop(0, `hsla(${(hue+200)%360}, 60%, 70%, 0.05)`);
+                    g.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = g;
+                    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
+
+                    if (this.useRealSky && this.geo.enabled) {
+                        this.drawRealSky(ctx, now);
+                    } else {
+                        // Procedural sky with faint Milky Way band
+                        this.drawMilkyWayBand(ctx, now);
+                        // Fallback procedural stars
+                        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                        for (const star of this.stars) {
+                            if (!reduced) star.a += 0.02 * star.s; // no flicker when reduced
+                            const tw = reduced ? 0.2 : 0.5 + Math.sin(star.a) * 0.5;
+                            let r = star.r * (0.8 + tw * 0.4);
+                            if (!reduced) {
+                                const dx = star.x - this._mouse.x, dy = star.y - this._mouse.y;
+                                const d2 = dx*dx + dy*dy;
+                                if (d2 < 140*140) r *= 1 + (1 - Math.sqrt(d2)/140) * 0.5;
+                            }
+                            ctx.beginPath();
+                            ctx.arc(star.x, star.y, r, 0, Math.PI*2);
+                            ctx.fill();
+                        }
+                        // Adaptive density every 2s (disabled in reduced to keep static)
+                        if (!reduced && now - this._lastAdjust > 2000) {
+                            this._lastAdjust = now;
+                            const desired = Math.max(60, Math.min(160, Math.round(this.stars.length * (this._avgDt > 45 ? 0.9 : (this._avgDt < 28 ? 1.1 : 1)))));
+                            if (desired < this.stars.length) {
+                                this.stars.length = desired;
+                            } else if (desired > this.stars.length) {
+                                const add = desired - this.stars.length;
+                                for (let i=0; i<add; i++) {
+                                    this.stars.push({
+                                        x: Math.random() * window.innerWidth,
+                                        y: Math.random() * window.innerHeight,
+                                        r: Math.random() * 1.4 + 0.3,
+                                        a: Math.random() * Math.PI * 2,
+                                        s: 0.5 + Math.random() * 0.8
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // FX layer (constellations + extras)
+                    this.fx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+                    if (!reduced && this.prefs.embers) { this.updateEmbers(dt); this.drawEmbers(this.fx); }
+                    this.constellations = this.constellations.filter(c => c.t < 1);
+                    for (const c of this.constellations) {
+                        c.t += reduced ? 0 : 0.02;
+                        this.fx.strokeStyle = `rgba(255,255,255,${1 - c.t})`;
+                        this.fx.lineWidth = 1;
+                        this.fx.beginPath();
+                        this.fx.moveTo(c.x1, c.y1);
+                        this.fx.lineTo(c.x2, c.y2);
+                        this.fx.stroke();
+                    }
+                    if (!reduced && this.useRealSky && this._visibleRealStars.length) {
+                        this.drawConstellationWeave(this.fx);
+                    }
+                    if (!reduced) {
+                        this.updateMeteors(now);
+                        this.drawMeteors(this.fx);
+                        this.updateRipples(now);
+                        this.drawRipples(this.fx);
+                    }
+
+                    requestAnimationFrame(step);
+                };
+                requestAnimationFrame(step);
+            }
+
+            // Compute and draw starfield based on observer location
+            drawRealSky(ctx, nowMs) {
+                const lat = this.geo.lat * Math.PI/180;
+                const lon = this.geo.lon; // degrees east
+                // Adjust for local sidereal time
+                const date = new Date(nowMs);
+                date.setUTCHours(date.getUTCHours() + 24 - (lon / 15));
+                const h = (date.getUTCHours() + date.getUTCMinutes()/60) * Math.PI / 12;
+                const sh = Math.sin(h), ch = Math.cos(h);
+                const x0 = window.innerWidth / 2;
+                const y0 = window.innerHeight / 2;
+                const r0 = Math.min(x0, y0) * 0.9;
+
+                ctx.save();
+                ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+                ctx.translate(x0, y0);
+                ctx.rotate(-Math.PI/2 + lat);
+
+                // Star drawing function
+                const drawStar = (x, y, radius, alpha) => {
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI*2);
+                    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                    ctx.fill();
+                };
+
+                // Draw each star in the catalog
+                const cx = window.innerWidth/2;
+                const cy = window.innerHeight/2;
+                const maxR = Math.min(cx, cy) * 0.95;
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                this._visibleRealStars = [];
+
+                for (const s of this.realStarsCatalog) {
+                    const ra = s.ra * Math.PI / 12; // convert to radians
+                    const dec = s.dec * Math.PI / 180;
+                    const x = (Math.cos(dec) * Math.sin(ra - h) * r0) | 0;
+                    const y = (Math.sin(dec) * r0) | 0;
+                    const radius = Math.max(1, 3 - s.mag / 2);
+                    const alpha = Math.min(1, Math.max(0, (1 - (Math.abs(s.dec - lat) / (Math.PI/6))) * (1 - Math.abs((ra - h) / Math.PI))));
+
+                    if (alpha > 0) {
+                        drawStar(x, y, radius, alpha);
+                        this._visibleRealStars.push({ x, y, mag: s.mag });
+                    }
+                }
+
+                ctx.restore();
+            }
+
+            // Milky Way band (procedural)
+            drawMilkyWayBand(ctx, now) {
+                const cx = window.innerWidth/2, cy = window.innerHeight/2;
+                const len = Math.hypot(window.innerWidth, window.innerHeight);
+                const band = Math.max(120, Math.min(260, len * 0.18));
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(((now/30000) % (Math.PI*2)) + 0.4);
+                const g = ctx.createLinearGradient(-len/2, 0, len/2, 0);
+                g.addColorStop(0.0, 'rgba(255,255,255,0)');
+                g.addColorStop(0.35, 'rgba(255,255,255,0.015)');
+                g.addColorStop(0.5, 'rgba(255,255,255,0.035)');
+                g.addColorStop(0.65, 'rgba(255,255,255,0.015)');
+                g.addColorStop(1.0, 'rgba(255,255,255,0)');
+                ctx.fillStyle = g;
+                ctx.fillRect(-len/2, -band/2, len, band);
+                ctx.restore();
+            }
+
+            // Draw faint connections among nearest visible stars
+            drawConstellationWeave(ctx) {
+                const stars = this._visibleRealStars;
+                if (!stars || stars.length < 2) return;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+                ctx.lineWidth = 0.8;
+                for (let i=0; i<stars.length; i++) {
+                    const a = stars[i];
+                    // Find up to 2 nearest within threshold
+                    const nn = [];
+                    for (let j=0; j<stars.length; j++) if (i!==j) {
+                        const b = stars[j];
+                        const dx = a.x - b.x, dy = a.y - b.y;
+                        const d2 = dx*dx + dy*dy;
+                        if (d2 < 160*160) nn.push({ j, d2 });
+                    }
+                    nn.sort((u,v) => u.d2 - v.d2);
+                    for (let k=0; k<Math.min(2, nn.length); k++) {
+                        const b = stars[nn[k].j];
+                        const alpha = Math.max(0.02, 0.12 - (Math.sqrt(nn[k].d2)/300));
+                        ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+                        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                    }
+                }
+                ctx.restore();
+            }
+
+            // Meteors (shooting stars)
+            spawnMeteor(now) {
+                const edge = Math.floor(Math.random()*4); // 0 top,1 right,2 bottom,3 left
+                const margin = 40;
+                let x, y, vx, vy;
+                const w = window.innerWidth, h = window.innerHeight;
+                if (edge===0) { x = Math.random()*w; y = -margin; vx = (Math.random()*0.6+0.2); vy = (Math.random()*0.4+0.6); }
+                else if (edge===2) { x = Math.random()*w; y = h+margin; vx = -(Math.random()*0.6+0.2); vy = -(Math.random()*0.4+0.6); }
+                else if (edge===1) { x = w+margin; y = Math.random()*h; vx = -(Math.random()*0.6+0.6); vy = (Math.random()*0.4-0.2); }
+                else { x = -margin; y = Math.random()*h; vx = (Math.random()*0.6+0.6); vy = -(Math.random()*0.4-0.2); }
+                // Normalize velocity
+                const m = Math.hypot(vx, vy) || 1; vx/=m; vy/=m;
+                this.meteors.push({
+                    t0: now,
+                    life: 1200 + Math.random()*600,
+                    x, y, vx, vy,
+                    speed: 600 + Math.random()*400,
+                    tail: 80 + Math.random()*60
+                });
+            }
+            updateMeteors(now) {
+                if (!this._nextMeteorAt) this._nextMeteorAt = now + 8000 + Math.random()*12000;
+                if (now >= this._nextMeteorAt) {
+                    this.spawnMeteor(now);
+                    this._nextMeteorAt = now + 12000 + Math.random()*20000;
+                }
+                const w = window.innerWidth, h = window.innerHeight;
+                this.meteors = this.meteors.filter(m => {
+                    const t = (now - m.t0);
+                    const px = m.x + m.vx * m.speed * t/1000;
+                    const py = m.y + m.vy * m.speed * t/1000;
+                    m.px = px; m.py = py;
+                    return t < m.life && px>-100 && px<w+100 && py>-100 && py<h+100;
+                });
+            }
+            drawMeteors(ctx) {
+                for (const m of this.meteors) {
+                    const ex = m.px, ey = m.py;
+                    const sx = ex - m.vx * m.tail;
+                    const sy = ey - m.vy * m.tail;
+                    const g = ctx.createLinearGradient(sx, sy, ex, ey);
+                    g.addColorStop(0, 'rgba(255,255,255,0)');
+                    g.addColorStop(1, 'rgba(255,255,255,0.35)');
+                    ctx.strokeStyle = g;
+                    ctx.lineWidth = 1.2;
+                    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+                }
+            }
+
+            // Evolution ripple
+            spawnRipple(x, y) {
+                this.ripples.push({ t0: performance.now(), x, y, life: 1400, r0: 40, r1: Math.max(window.innerWidth, window.innerHeight) * 0.6 });
+            }
+            updateRipples(now) {
+                this.ripples = this.ripples.filter(r => (now - r.t0) < r.life);
+            }
+            drawRipples(ctx) {
+                for (const r of this.ripples) {
+                    const t = (performance.now() - r.t0) / r.life;
+                    const radius = r.r0 + (r.r1 - r.r0) * t;
+                    const alpha = 0.18 * (1 - t);
+                    ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.arc(r.x, r.y, radius, 0, Math.PI*2); ctx.stroke();
+                }
+            }
+
+            handleEvolutionEvent(payload) {
+                const { milestone } = payload;
+                // Spawn ripple at center
+                this.spawnRipple(window.innerWidth/2, window.innerHeight/2);
+                // Counter pulse and ember flash
+                this.elements.counter.classList.add('pulse');
+                setTimeout(()=>this.elements.counter.classList.remove('pulse'), 900);
+                for (const e of this.embers) e.o = Math.min(0.12, e.o*1.8);
+            }
+
+            updateCounter(count) {
+                if (!Number.isFinite(count)) return;
+                // Smooth counter increase animation
+                const step = (now) => {
+                    this.counterValue = Math.min(count, this.counterValue + (now - (this._lastCounterUpdate || 0)) / 1500);
+                    this.elements.counter.textContent = Math.floor(this.counterValue).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                    this.elements.counter.classList.toggle('connected', this.isConnected);
+                    this.elements.counter.classList.toggle('reconnecting', !this.isConnected && this.reconnectAttempts > 0);
+                    this.elements.counter.classList.toggle('disconnected', !this.isConnected && this.reconnectAttempts === 0);
+                    this._lastCounterUpdate = now;
+                    if (this.counterValue < count) { requestAnimationFrame(step); }
+                };
+                requestAnimationFrame(step);
+                // Update dynamic title
+                try { document.title = `${Number(count).toLocaleString()} — The Collective`; } catch {}
+            }
+
+            bindParallax() {
+                let raf = null;
+                const target = { x: 0, y: 0 };
+                const onMove = (x, y) => {
+                    const w = window.innerWidth, h = window.innerHeight;
+                    target.x = (x / w - 0.5) * 2; // -1..1
+                    target.y = (y / h - 0.5) * 2;
+                    this._mouse.x = x; this._mouse.y = y;
+                    if (!raf) raf = requestAnimationFrame(()=>{
+                        raf = null;
+                        // ease towards target
+                        this._parallax.x = this._parallax.x * 0.8 + target.x * 0.2;
+                        this._parallax.y = this._parallax.y * 0.8 + target.y * 0.2;
+                    });
+                };
+                window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY), { passive: true });
+                window.addEventListener('touchmove', (e) => {
+                    if (e.touches && e.touches[0]) onMove(e.touches[0].clientX, e.touches[0].clientY);
+                }, { passive: true });
+            }
+
+            bindKeyboard() {
+                const hud = document.getElementById('hud');
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === '?') { hud.hidden = !hud.hidden; }
+                    if (e.key === 'u') { this.cycleUI(); }
+                    if (e.key === 'r') { this.setPref('sky', this.useRealSky ? 'proc' : 'real'); }
+                    if (e.key === 'm') { this.setPref('motion', this.prefs.motion === 'reduce' ? 'on' : 'reduce'); }
+                    if (e.key === 'p') { this.setPref('peak', !this.prefs.peak); }
+                    if (e.key === 't') { this.setPref('time', !this.prefs.time); }
+                    if (e.key === 'g') { this.initGeolocation(); this.setPref('sky', 'real'); }
+                    if (e.key === 'o') { this.setPref('geometry', !this.prefs.geometry); }
+                    if (e.key === 'n') { this.setPref('moon', !this.prefs.moon); }
+                    if (e.key === 's') { this.setPref('sound', !this.prefs.sound); }
+                    if (e.key === 'f') { this.toggleFullscreen(); }
+                    if (e.key === 'e') { this.setPref('embers', !this.prefs.embers); }
+                    if (e.code === 'Space') { this.elements.aura && this.elements.aura.classList.add('focus'); e.preventDefault(); }
+                });
+                window.addEventListener('keyup', (e) => {
+                    if (e.code === 'Space') { this.elements.aura && this.elements.aura.classList.remove('focus'); }
+                });
+            }
+
+            toggleFullscreen() {
+                const de = document.documentElement;
+                if (!document.fullscreenElement) { de.requestFullscreen && de.requestFullscreen().catch(()=>{}); }
+                else { document.exitFullscreen && document.exitFullscreen().catch(()=>{}); }
+            }
+
+            // Programmatic API additions remain compatible
+            initProgrammaticAPI() {
+                const api = {
+                    on: (ev, cb) => document.addEventListener(ev, cb),
+                    off: (ev, cb) => document.removeEventListener(ev, cb),
+                    getState: () => ({
+                        connected: this.isConnected,
+                        counter: this.counterValue,
+                        geo: { ...this.geo },
+                        prefs: { ...this.prefs }
+                    }),
+                    set: (k,v) => this.setPref(k,v),
+                    command: (name, args) => this.command(name, args)
+                };
+                window.Collective = api;
+                window.addEventListener('message', (e) => {
+                    const data = e.data || {};
+                    if (data && data.type === 'collective') {
+                        if (data.cmd === 'set') this.setPref(data.key, data.value);
+                        if (data.cmd === 'command') this.command(data.name, data.args);
+                    }
+                });
+            }
+            command(name, args) {
+                switch(name) {
+                    case 'ui': this.setPref('ui', args); break;
+                    case 'sky': this.setPref('sky', args); if (args==='real') this.initGeolocation(); break;
+                    case 'motion': this.setPref('motion', args); break;
+                    case 'aura': this.setPref('aura', !!args); break;
+                    case 'milestones': this.setPref('milestones', !!args); break;
+                    case 'peak': this.setPref('peak', !!args); break;
+                    case 'time': this.setPref('time', !!args); break;
+                    case 'geometry': this.setPref('geometry', !!args); break;
+                    case 'moon': this.setPref('moon', !!args); break;
+                    case 'sound': this.setPref('sound', !!args); break;
+                    case 'fullscreen': this.toggleFullscreen(); break;
+                    case 'embers': this.setPref('embers', !!args); break;
+                }
+            }
+
+            // Idle fade (also hide cursor)
+            resetIdle() {
+                document.body.classList.remove('ui-fade','hide-cursor');
+                clearTimeout(this._idleTimer);
+                if (this.prefs.ui !== 'none') {
+                    this._idleTimer = setTimeout(() => {
+                        document.body.classList.add('ui-fade','hide-cursor');
+                    }, 8000);
+                }
+            }
+
+            // Pointer parallax for haze
+            bindParallax() {
+                let raf = null;
+                const target = { x: 0, y: 0 };
+                const onMove = (x, y) => {
+                    const w = window.innerWidth, h = window.innerHeight;
+                    target.x = (x / w - 0.5) * 2; // -1..1
+                    target.y = (y / h - 0.5) * 2;
+                    this._mouse.x = x; this._mouse.y = y;
+                    if (!raf) raf = requestAnimationFrame(()=>{
+                        raf = null;
+                        // ease towards target
+                        this._parallax.x = this._parallax.x * 0.8 + target.x * 0.2;
+                        this._parallax.y = this._parallax.y * 0.8 + target.y * 0.2;
+                    });
+                };
+                window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY), { passive: true });
+                window.addEventListener('touchmove', (e) => {
+                    if (e.touches && e.touches[0]) onMove(e.touches[0].clientX, e.touches[0].clientY);
+                }, { passive: true });
+            }
+
+            updateBreath(connections) {
+                if (!this.elements.aura) return;
+                const n = Math.max(1, Number(connections) || 1);
+                const duration = Math.round(7000 - Math.min(5000, Math.log10(n) * 1800)); // 7s..~2s
+                this.breathMs = duration;
+                this.elements.aura.style.setProperty('--breath-duration', `${duration}ms`);
+                // Synchronize breath phase across clients using local time
+                const offset = Date.now() % duration;
+                this.elements.aura.style.animationDelay = `-${offset}ms`;
             }
 
             connect() {
                 try {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${protocol}//${window.location.host}/socket`;
-                    
-                    this.updateConnectionStatus('Connecting to The Collective...');
-                    
-                    this.socket = new WebSocket(`${wsUrl}/websocket`);
-                    
-                    this.socket.onopen = () => {
-                        this.onSocketOpen();
-                    };
-                    
+                    const wsUrl = `${protocol}//${window.location.host}/socket/websocket?vsn=2.0.0`;
+                    this.setConnectionState('reconnecting', 'Connecting to The Collective...');
+                    this.socket = new WebSocket(wsUrl);
+                    this.socket.onopen = () => { this.onSocketOpen(); };
                     this.socket.onmessage = (event) => {
-                        this.handleMessage(JSON.parse(event.data));
+                        const raw = JSON.parse(event.data);
+                        const msg = Array.isArray(raw)
+                            ? { join_ref: raw[0], ref: raw[1], topic: raw[2], event: raw[3], payload: raw[4] }
+                            : raw;
+                        this.handleMessage(msg);
                     };
-                    
-                    this.socket.onclose = () => {
-                        this.onSocketClose();
-                    };
-                    
+                    this.socket.onclose = () => { this.onSocketClose(); };
                     this.socket.onerror = (error) => {
                         console.error('WebSocket error:', error);
-                        this.updateConnectionStatus('Connection error');
+                        this.setConnectionState('disconnected', 'Connection error');
                     };
-                    
                 } catch (error) {
                     console.error('Failed to connect:', error);
                     this.scheduleReconnect();
                 }
             }
 
-            onSocketOpen() {
-                this.isConnected = true;
-                this.reconnectAttempts = 0;
-                this.updateConnectionStatus('Connected to The Collective');
-                
-                // Start Phoenix heartbeat to keep connection alive
-                this.startHeartbeat();
-                
-                // Join the collective channel
-                this.joinChannel();
-            }
-
             startHeartbeat() {
                 this.stopHeartbeat();
                 this.heartbeatInterval = setInterval(() => {
                     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                        const heartbeat = {
-                            topic: 'phoenix',
-                            event: 'heartbeat',
-                            payload: {},
-                            ref: this.generateRef()
-                        };
-                        this.socket.send(JSON.stringify(heartbeat));
+                        const ref = this.generateRef();
+                        const frame = [null, ref, 'phoenix', 'heartbeat', {}];
+                        this.socket.send(JSON.stringify(frame));
                     }
                 }, this.heartbeatMs);
             }
 
-            stopHeartbeat() {
-                if (this.heartbeatInterval) {
-                    clearInterval(this.heartbeatInterval);
-                    this.heartbeatInterval = null;
-                }
-            }
-
             joinChannel() {
-                const joinMessage = {
-                    topic: "collective:lobby",
-                    event: "phx_join",
-                    payload: {},
-                    ref: this.generateRef()
-                };
-                
-                this.socket.send(JSON.stringify(joinMessage));
-            }
-
-            onSocketClose() {
-                this.isConnected = false;
-                this.stopHeartbeat();
-                this.elements.counter.classList.remove('connected');
-                this.elements.counter.classList.add('disconnected');
-                this.updateConnectionStatus('Disconnected from The Collective');
-                this.scheduleReconnect();
+                const ref = this.generateRef();
+                this.joinRef = ref;
+                const frame = [ref, ref, 'collective:lobby', 'phx_join', {}];
+                this.socket.send(JSON.stringify(frame));
             }
 
             handleMessage(message) {
                 const { topic, event, payload } = message;
-                
-                if (topic === "collective:lobby") {
+                if (topic === 'collective:lobby') {
                     switch (event) {
-                        case "phx_reply":
-                            if (payload.status === "ok") {
+                        case 'phx_reply':
+                            if (payload.status === 'ok') {
                                 this.elements.counter.classList.add('connected');
                                 this.elements.counter.classList.remove('disconnected');
                             }
                             break;
-                        
-                        case "welcome":
+                        case 'welcome':
                             this.handleWelcome(payload);
+                            this.dispatch('collective:welcome', payload);
                             break;
-                        
-                        case "state_update":
+                        case 'state_update':
                             this.handleStateUpdate(payload);
+                            this.dispatch('collective:state', payload);
                             break;
-                        
-                        case "evolution_event":
+                        case 'evolution_event':
                             this.handleEvolutionEvent(payload);
+                            this.dispatch('collective:evolution', payload);
                             break;
                     }
                 }
-            }
-
-            handleWelcome(payload) {
-                const { concurrent_connections, total_connection_seconds, unlocked_milestones, peak_connections } = payload;
-                
-                this.updateCounter(concurrent_connections);
-                this.updateTotalTime(total_connection_seconds);
-                this.updatePeak(peak_connections);
-                this.elements.status.textContent = 'COLLECTIVE CONSCIOUSNESS';
-                
-                // Display existing milestones
-                if (unlocked_milestones && unlocked_milestones.length > 0) {
-                    unlocked_milestones.forEach(milestone => {
-                        this.addMilestone(milestone, false);
-                    });
-                }
-            }
-            
-            handleStateUpdate(payload) {
-                const { concurrent_connections, total_connection_seconds, peak_connections } = payload;
-                this.updateCounter(concurrent_connections);
-                if (total_connection_seconds !== undefined) {
-                    this.updateTotalTime(total_connection_seconds);
-                }
-                if (peak_connections !== undefined) {
-                    this.updatePeak(peak_connections);
-                }
-            }
-
-            handleEvolutionEvent(payload) {
-                const { milestone } = payload;
-                
-                // Trigger evolution flash
-                this.triggerEvolutionFlash();
-                
-                // Add milestone to display
-                this.addMilestone(milestone, true);
-                
-                // Update status temporarily
-                const originalStatus = this.elements.status.textContent;
-                this.elements.status.textContent = 'EVOLUTION EVENT';
-                setTimeout(() => {
-                    this.elements.status.textContent = originalStatus;
-                }, 3000);
-            }
-
-            updateCounter(count) {
-                if (!Number.isFinite(count)) return;
-                if (this.prefersReducedMotion) {
-                    this.counterValue = count;
-                    this.elements.counter.textContent = Number(count).toLocaleString();
-                    return;
-                }
-                this.animateCounter(Number(count));
-            }
-
-            animateCounter(target) {
-                if (this.counterRaf) cancelAnimationFrame(this.counterRaf);
-                const start = this.counterValue || 0;
-                const delta = target - start;
-                if (delta === 0) return;
-                const duration = 300; // ms
-                const t0 = performance.now();
-                const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
-                const step = (now) => {
-                    const t = Math.min(1, (now - t0) / duration);
-                    const val = Math.round(start + delta * easeOutCubic(t));
-                    this.elements.counter.textContent = val.toLocaleString();
-                    if (t < 1) {
-                        this.counterRaf = requestAnimationFrame(step);
-                    } else {
-                        this.counterValue = target;
-                        this.counterRaf = null;
-                    }
-                };
-                this.counterRaf = requestAnimationFrame(step);
-            }
-
-            updateTotalTime(seconds) {
-                if (seconds !== undefined && seconds !== null) {
-                    this.elements.totalTime.textContent = `Total Experience: ${this.formatDuration(Number(seconds))}`;
-                }
-            }
-
-            formatDuration(totalSeconds) {
-                totalSeconds = Math.max(0, Math.floor(totalSeconds));
-                const units = [
-                    { label: 'y', seconds: 31_536_000 },
-                    { label: 'd', seconds: 86_400 },
-                    { label: 'h', seconds: 3_600 },
-                    { label: 'm', seconds: 60 },
-                    { label: 's', seconds: 1 }
-                ];
-                const parts = [];
-                for (const {label, seconds} of units) {
-                    const qty = Math.floor(totalSeconds / seconds);
-                    if (qty > 0 || (label === 's' && parts.length === 0)) {
-                        parts.push(`${qty}${label}`);
-                        totalSeconds -= qty * seconds;
-                    }
-                    if (parts.length >= 3) break; // keep it concise
-                }
-                return parts.join(' ');
-            }
-
-            updateConnectionStatus(status) {
-                this.elements.connectionStatus.textContent = status;
-            }
-
-            updatePeak(peak) {
-                if (peak !== undefined && peak !== null) {
-                    this.elements.peak.textContent = `Peak: ${Number(peak).toLocaleString()}`;
-                }
-            }
-
-            triggerEvolutionFlash() {
-                this.elements.evolutionFlash.classList.add('active');
-                setTimeout(() => {
-                    this.elements.evolutionFlash.classList.remove('active');
-                }, 1000);
-            }
-
-            addMilestone(milestone, isNew = false) {
-                const milestoneEl = document.createElement('div');
-                milestoneEl.className = 'milestone';
-                milestoneEl.innerHTML = `
-                    <strong>${milestone.name || milestone.id}</strong><br>
-                    <small>${milestone.description || `Threshold: ${milestone.threshold}`}</small>
-                `;
-                
-                if (isNew) {
-                    // Insert at the top for new milestones
-                    this.elements.milestones.insertBefore(milestoneEl, this.elements.milestones.firstChild);
-                } else {
-                    // Append for existing milestones
-                    this.elements.milestones.appendChild(milestoneEl);
-                }
-            }
-
-            scheduleReconnect() {
-                if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                    this.updateConnectionStatus('Maximum reconnection attempts reached');
-                    return;
-                }
-
-                this.reconnectAttempts++;
-                const base = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-                const jitter = Math.random() * 250;
-                const delay = base + jitter;
-                
-                this.updateConnectionStatus(`Reconnecting in ${Math.ceil(delay / 1000)} seconds... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-                this.elements.counter.classList.add('reconnecting');
-                
-                setTimeout(() => {
-                    this.elements.counter.classList.remove('reconnecting');
-                    this.connect();
-                }, delay);
-            }
-
-            generateRef() {
-                return Math.random().toString(36).substring(2, 15);
             }
         }
 
-        // Initialize The Collective client when page loads
+        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             new CollectiveClient();
         });
 
-        // Prevent context menu and selection to maintain the meditative experience
+        // Maintain the meditative experience
         document.addEventListener('contextmenu', e => e.preventDefault());
         document.addEventListener('selectstart', e => e.preventDefault());
     </script>
