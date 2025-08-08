@@ -27,11 +27,11 @@ defmodule TheCollectiveWeb.CollectiveChannel do
       {:ok, new_count} ->
         Logger.info("Concurrent connections: #{new_count}")
         
-        # Store the connection count in socket assigns
-        socket = assign(socket, :current_connections, new_count)
-        
-        # Get current global state for welcome message
-        _current_state = get_current_global_state()
+        # Store the connection count in socket assigns and mark as joined immediately
+        socket =
+          socket
+          |> assign(:current_connections, new_count)
+          |> assign(:joined, true)
         
         # Schedule post-join operations to happen after the join is complete
         send(self(), {:after_join})
@@ -58,20 +58,23 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   """
   def handle_info({:after_join}, socket) do
     Logger.info("Concurrent connections: #{socket.assigns.current_connections}")
-    
+
     # Check for milestone achievements
     TheCollective.Evolution.check_milestones(socket.assigns.current_connections)
-    
+
+    # Update peak connections if a new peak is reached
+    current_peak = Redis.get_int("global:peak_connections") || 0
+    if socket.assigns.current_connections > current_peak do
+      Redis.set("global:peak_connections", socket.assigns.current_connections)
+    end
+
     # Get the current global state and send it to the newly joined soul
     current_state = get_current_global_state()
-    push(socket, "state_update", current_state)
-    
+    push(socket, "welcome", current_state)
+
     # Broadcast the connection update to all other souls
     broadcast_state_update(socket, current_state)
-    
-    # Mark this socket as fully joined
-    socket = assign(socket, :joined, true)
-    
+
     {:noreply, socket}
   end
   
@@ -81,7 +84,8 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   def handle_info({:broadcast_state_update, state}, socket) do
     broadcast_from(socket, "state_update", %{
       concurrent_connections: state.concurrent_connections,
-      total_connection_seconds: state.total_connection_seconds
+      total_connection_seconds: state.total_connection_seconds,
+      peak_connections: state.peak_connections
     })
     {:noreply, socket}
   end
@@ -94,30 +98,24 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   """
   def terminate(_reason, socket) do
     Logger.info("Soul leaving The Collective")
-    
-    # Only decrement if this socket was properly joined (has the :joined flag)
+
     if socket.assigns[:joined] do
-      # Decrement the concurrent connections counter atomically, but not below 0
-      case Redis.command(["DECR", "global:concurrent_connections"]) do
-        {:ok, new_count} when new_count >= 0 ->
+      case Redis.decr("global:concurrent_connections") do
+        {:ok, new_count} when is_integer(new_count) and new_count >= 0 ->
           Logger.info("Concurrent connections after departure: #{new_count}")
-          
-          # Broadcast the updated count to all remaining souls
           current_state = get_current_global_state()
           broadcast_state_update(socket, current_state)
-          
-        {:ok, negative_count} ->
-          # Reset to 0 if it went negative
-          Redis.command(["SET", "global:concurrent_connections", "0"])
-          Logger.warn("Connection count went negative (#{negative_count}), reset to 0")
-          
+        {:ok, negative} ->
+          # Clamp to zero on underflow
+          Redis.set("global:concurrent_connections", "0")
+          Logger.warn("Connection count went negative (#{inspect(negative)}), reset to 0")
         {:error, reason} ->
           Logger.error("Failed to decrement connections counter: #{inspect(reason)}")
       end
     else
       Logger.debug("Soul left before fully joining, no decrement needed")
     end
-    
+
     :ok
   end
   
@@ -133,11 +131,13 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     concurrent_connections = Redis.get_int("global:concurrent_connections") || 0
     total_connection_seconds = Redis.get_int("global:total_connection_seconds") || 0
     unlocked_milestones = get_unlocked_milestones()
+    peak_connections = Redis.get_int("global:peak_connections") || 0
     
     %{
       concurrent_connections: concurrent_connections,
       total_connection_seconds: total_connection_seconds,
-      unlocked_milestones: unlocked_milestones
+      unlocked_milestones: unlocked_milestones,
+      peak_connections: peak_connections
     }
   end
   
@@ -162,7 +162,8 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   defp broadcast_state_update(socket, state) do
     broadcast_from(socket, "state_update", %{
       concurrent_connections: state.concurrent_connections,
-      total_connection_seconds: state.total_connection_seconds
+      total_connection_seconds: state.total_connection_seconds,
+      peak_connections: state.peak_connections
     })
   end
   

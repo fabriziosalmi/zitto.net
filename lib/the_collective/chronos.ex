@@ -43,36 +43,35 @@ defmodule TheCollective.Chronos do
   """
   def handle_info(:tick, state) do
     current_time = System.system_time(:millisecond)
-    
+
     # Calculate actual time elapsed since last tick (for accuracy)
     time_elapsed_ms = current_time - state.last_tick_time
-    time_elapsed_seconds = div(time_elapsed_ms, 1000)
-    
+    time_elapsed_seconds = max(div(time_elapsed_ms, 1000), 1)
+
     # Get the number of active connections across all nodes
     active_connections = count_active_connections()
-    
+
     if active_connections > 0 do
       # Calculate time contribution for this interval
-      time_contribution = active_connections * max(time_elapsed_seconds, @time_contribution_per_tick)
-      
+      time_contribution = active_connections * max(time_elapsed_seconds, div(@tick_interval, 1000))
+
       # Update the global time counter atomically
       case Redis.incrby("global:total_connection_seconds", time_contribution) do
         {:ok, new_total} ->
           Logger.debug("Tick #{state.tick_count + 1}: #{active_connections} souls contributed #{time_contribution} seconds. Total: #{new_total}")
-          
-          # Check for evolution events after updating the time
           Evolution.check_for_evolution()
-          
+          # Broadcast a lightweight state update with new total time
+          broadcast_total_time(new_total)
         {:error, reason} ->
           Logger.error("Failed to update total connection seconds: #{inspect(reason)}")
       end
     else
       Logger.debug("Tick #{state.tick_count + 1}: No active souls to contribute time")
     end
-    
+
     # Schedule the next tick
     schedule_tick()
-    
+
     {:noreply, %{
       tick_count: state.tick_count + 1,
       last_tick_time: current_time
@@ -119,11 +118,11 @@ defmodule TheCollective.Chronos do
   def get_stats do
     GenServer.call(__MODULE__, :get_stats)
   end
-  
+
   def handle_call(:get_stats, _from, state) do
     active_connections = count_active_connections()
     total_seconds = Redis.get_int("global:total_connection_seconds") || 0
-    
+
     stats = %{
       tick_count: state.tick_count,
       active_connections: active_connections,
@@ -131,7 +130,21 @@ defmodule TheCollective.Chronos do
       last_tick_time: state.last_tick_time,
       uptime_ms: System.system_time(:millisecond) - (state.last_tick_time - (state.tick_count * @tick_interval))
     }
-    
+
     {:reply, stats, state}
+  end
+
+  defp broadcast_total_time(total_seconds) do
+    state = %{
+      concurrent_connections: Redis.get_int("global:concurrent_connections") || 0,
+      total_connection_seconds: total_seconds,
+      peak_connections: Redis.get_int("global:peak_connections") || 0
+    }
+
+    TheCollectiveWeb.Endpoint.broadcast("collective:lobby", "state_update", %{
+      concurrent_connections: state.concurrent_connections,
+      total_connection_seconds: state.total_connection_seconds,
+      peak_connections: state.peak_connections
+    })
   end
 end

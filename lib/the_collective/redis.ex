@@ -17,19 +17,21 @@ defmodule TheCollective.Redis do
   
   def init(opts) do
     redis_url = Application.get_env(:the_collective, :redis_url, "redis://localhost:6379")
-    pool_size = Keyword.get(opts, :pool_size, 10)
-    
+    # Prefer configured pool size to avoid mismatch with command/1 selector
+    pool_size = Application.get_env(:the_collective, :redis_pool_size, Keyword.get(opts, :pool_size, 10))
+    pool_size = if is_integer(pool_size) and pool_size > 0, do: pool_size, else: 10
+
     children = for i <- 1..pool_size do
       Supervisor.child_spec(
         {Redix, {redis_url, [name: :"#{@redis_pool_name}_#{i}"]}},
         id: {Redix, i}
       )
     end
-    
+
     {:ok, pid} = Supervisor.start_link(children, strategy: :one_for_one)
-    
-    Logger.info("Redis pool started with #{pool_size} connections")
-    
+
+    Logger.info("Redis pool started with #{pool_size} connections (#{redis_url})")
+
     {:ok, %{supervisor: pid, pool_size: pool_size}}
   end
   
@@ -159,6 +161,12 @@ defmodule TheCollective.Redis do
     # Initialize total connection seconds to 0 if not exists
     case get("global:total_connection_seconds") do
       {:ok, nil} -> set("global:total_connection_seconds", "0")
+      _ -> :ok
+    end
+
+    # Initialize peak connections to 0 if not exists
+    case get("global:peak_connections") do
+      {:ok, nil} -> set("global:peak_connections", "0")
       _ -> :ok
     end
     

@@ -160,7 +160,7 @@ defmodule TheCollective.Evolution do
   def check_for_evolution do
     current_state = get_current_state()
     unlocked_milestones = get_unlocked_milestone_ids()
-    
+
     milestones()
     |> Enum.each(fn {milestone_id, milestone} ->
       if not MapSet.member?(unlocked_milestones, milestone_id) do
@@ -217,8 +217,8 @@ defmodule TheCollective.Evolution do
   """
   defp get_unlocked_milestone_ids do
     case Redis.smembers("global:unlocked_milestones") do
-      {:ok, milestone_ids} -> MapSet.new(milestone_ids)
-      {:error, _} -> MapSet.new()
+      {:ok, milestone_ids} when is_list(milestone_ids) -> MapSet.new(milestone_ids)
+      _ -> MapSet.new()
     end
   end
   
@@ -241,21 +241,14 @@ defmodule TheCollective.Evolution do
   Unlock a milestone and broadcast the evolution event.
   """
   defp unlock_milestone(milestone) do
-    Logger.info("🎉 EVOLUTION EVENT: #{milestone.name} achieved!")
-    
-    # Add to unlocked milestones set in Redis
+    Logger.info("EVOLUTION EVENT: #{milestone.name || milestone.id}")
+
     case Redis.sadd("global:unlocked_milestones", milestone.id) do
       {:ok, 1} ->
-        # Successfully added (wasn't already there)
-        Logger.info("Milestone #{milestone.id} unlocked and stored in Redis")
-        
-        # Broadcast evolution event to all connected souls
+        Logger.info("Milestone #{milestone.id} unlocked")
         CollectiveChannel.broadcast_evolution_event(milestone)
-        
       {:ok, 0} ->
-        # Already existed (race condition)
-        Logger.debug("Milestone #{milestone.id} was already unlocked")
-        
+        Logger.debug("Milestone #{milestone.id} already unlocked (race)")
       {:error, reason} ->
         Logger.error("Failed to store milestone #{milestone.id}: #{inspect(reason)}")
     end
@@ -269,7 +262,7 @@ defmodule TheCollective.Evolution do
   defp check_sustained_thousand(state) do
     # This is a simplified check - in production you might want to track
     # the duration of high connection counts more precisely
-    state.concurrent_connections >= 1000 and state.total_connection_seconds >= 3_600_000
+    state.concurrent_connections >= 1000 and state.total_connection_seconds >= 3_600
   end
   
   @doc """

@@ -123,11 +123,21 @@
         .disconnected {
             color: #666 !important;
         }
+
+        .peak {
+            position: absolute;
+            top: 2rem;
+            left: 2rem;
+            color: #444;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
     <div class="evolution-flash" id="evolution-flash"></div>
     
+    <div class="peak" id="peak">Peak: --</div>
+
     <div class="container">
         <div class="collective-counter" id="counter">---</div>
         <div class="status" id="status">COLLECTIVE AWAKENING...</div>
@@ -151,6 +161,8 @@
                 this.maxReconnectAttempts = 10;
                 this.baseReconnectDelay = 1000;
                 this.isConnected = false;
+                this.heartbeatInterval = null;
+                this.heartbeatMs = 25000;
                 
                 this.elements = {
                     counter: document.getElementById('counter'),
@@ -158,7 +170,8 @@
                     connectionStatus: document.getElementById('connection-status'),
                     milestones: document.getElementById('milestones'),
                     evolutionFlash: document.getElementById('evolution-flash'),
-                    totalTime: document.getElementById('total-time')
+                    totalTime: document.getElementById('total-time'),
+                    peak: document.getElementById('peak')
                 };
 
                 this.connect();
@@ -201,8 +214,33 @@
                 this.reconnectAttempts = 0;
                 this.updateConnectionStatus('Connected to The Collective');
                 
+                // Start Phoenix heartbeat to keep connection alive
+                this.startHeartbeat();
+                
                 // Join the collective channel
                 this.joinChannel();
+            }
+
+            startHeartbeat() {
+                this.stopHeartbeat();
+                this.heartbeatInterval = setInterval(() => {
+                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                        const heartbeat = {
+                            topic: 'phoenix',
+                            event: 'heartbeat',
+                            payload: {},
+                            ref: this.generateRef()
+                        };
+                        this.socket.send(JSON.stringify(heartbeat));
+                    }
+                }, this.heartbeatMs);
+            }
+
+            stopHeartbeat() {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
             }
 
             joinChannel() {
@@ -218,6 +256,7 @@
 
             onSocketClose() {
                 this.isConnected = false;
+                this.stopHeartbeat();
                 this.elements.counter.classList.remove('connected');
                 this.elements.counter.classList.add('disconnected');
                 this.updateConnectionStatus('Disconnected from The Collective');
@@ -252,10 +291,11 @@
             }
 
             handleWelcome(payload) {
-                const { concurrent_connections, total_connection_seconds, unlocked_milestones } = payload;
+                const { concurrent_connections, total_connection_seconds, unlocked_milestones, peak_connections } = payload;
                 
                 this.updateCounter(concurrent_connections);
                 this.updateTotalTime(total_connection_seconds);
+                this.updatePeak(peak_connections);
                 this.elements.status.textContent = 'COLLECTIVE CONSCIOUSNESS';
                 
                 // Display existing milestones
@@ -267,10 +307,13 @@
             }
 
             handleStateUpdate(payload) {
-                const { concurrent_connections, total_connection_seconds } = payload;
+                const { concurrent_connections, total_connection_seconds, peak_connections } = payload;
                 this.updateCounter(concurrent_connections);
                 if (total_connection_seconds !== undefined) {
                     this.updateTotalTime(total_connection_seconds);
+                }
+                if (peak_connections !== undefined) {
+                    this.updatePeak(peak_connections);
                 }
             }
 
@@ -303,6 +346,12 @@
 
             updateConnectionStatus(status) {
                 this.elements.connectionStatus.textContent = status;
+            }
+
+            updatePeak(peak) {
+                if (peak !== undefined && peak !== null) {
+                    this.elements.peak.textContent = `Peak: ${Number(peak).toLocaleString()}`;
+                }
             }
 
             triggerEvolutionFlash() {
