@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Collective</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            color: #333;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            position: relative;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            position: relative;
+        }
+
+        .collective-counter {
+            font-size: 8rem;
+            font-weight: bold;
+            color: #222;
+            text-align: center;
+            margin-bottom: 2rem;
+            transition: color 0.3s ease;
+        }
+
+        .collective-counter.connected {
+            color: #444;
+        }
+
+        .status {
+            font-size: 1.2rem;
+            color: #555;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .connection-status {
+            font-size: 0.9rem;
+            color: #777;
+            position: absolute;
+            bottom: 2rem;
+            left: 2rem;
+        }
+
+        .milestones {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            max-width: 300px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .milestone {
+            background: #111;
+            border: 1px solid #333;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #666;
+            opacity: 0;
+            transform: translateX(50px);
+            animation: slideIn 0.5s ease forwards;
+        }
+
+        @keyframes slideIn {
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .evolution-flash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+            opacity: 0;
+            z-index: 1000;
+        }
+
+        .evolution-flash.active {
+            animation: evolutionPulse 1s ease-out;
+        }
+
+        @keyframes evolutionPulse {
+            0% { opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        .total-time {
+            font-size: 1rem;
+            color: #555;
+            margin-top: 1rem;
+        }
+
+        .reconnecting {
+            color: #888 !important;
+        }
+
+        .disconnected {
+            color: #666 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="evolution-flash" id="evolution-flash"></div>
+    
+    <div class="container">
+        <div class="collective-counter" id="counter">---</div>
+        <div class="status" id="status">COLLECTIVE AWAKENING...</div>
+        <div class="total-time" id="total-time">Total Experience: --- seconds</div>
+    </div>
+
+    <div class="connection-status" id="connection-status">
+        Connecting to The Collective...
+    </div>
+
+    <div class="milestones" id="milestones">
+        <!-- Evolution events will appear here -->
+    </div>
+
+    <script>
+        class CollectiveClient {
+            constructor() {
+                this.socket = null;
+                this.channel = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 10;
+                this.baseReconnectDelay = 1000;
+                this.isConnected = false;
+                
+                this.elements = {
+                    counter: document.getElementById('counter'),
+                    status: document.getElementById('status'),
+                    connectionStatus: document.getElementById('connection-status'),
+                    milestones: document.getElementById('milestones'),
+                    evolutionFlash: document.getElementById('evolution-flash'),
+                    totalTime: document.getElementById('total-time')
+                };
+
+                this.connect();
+            }
+
+            connect() {
+                try {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/socket`;
+                    
+                    this.updateConnectionStatus('Connecting to The Collective...');
+                    
+                    this.socket = new WebSocket(`${wsUrl}/websocket`);
+                    
+                    this.socket.onopen = () => {
+                        this.onSocketOpen();
+                    };
+                    
+                    this.socket.onmessage = (event) => {
+                        this.handleMessage(JSON.parse(event.data));
+                    };
+                    
+                    this.socket.onclose = () => {
+                        this.onSocketClose();
+                    };
+                    
+                    this.socket.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.updateConnectionStatus('Connection error');
+                    };
+                    
+                } catch (error) {
+                    console.error('Failed to connect:', error);
+                    this.scheduleReconnect();
+                }
+            }
+
+            onSocketOpen() {
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this.updateConnectionStatus('Connected to The Collective');
+                
+                // Join the collective channel
+                this.joinChannel();
+            }
+
+            joinChannel() {
+                const joinMessage = {
+                    topic: "collective:lobby",
+                    event: "phx_join",
+                    payload: {},
+                    ref: this.generateRef()
+                };
+                
+                this.socket.send(JSON.stringify(joinMessage));
+            }
+
+            onSocketClose() {
+                this.isConnected = false;
+                this.elements.counter.classList.remove('connected');
+                this.elements.counter.classList.add('disconnected');
+                this.updateConnectionStatus('Disconnected from The Collective');
+                this.scheduleReconnect();
+            }
+
+            handleMessage(message) {
+                const { topic, event, payload } = message;
+                
+                if (topic === "collective:lobby") {
+                    switch (event) {
+                        case "phx_reply":
+                            if (payload.status === "ok") {
+                                this.elements.counter.classList.add('connected');
+                                this.elements.counter.classList.remove('disconnected');
+                            }
+                            break;
+                        
+                        case "welcome":
+                            this.handleWelcome(payload);
+                            break;
+                        
+                        case "state_update":
+                            this.handleStateUpdate(payload);
+                            break;
+                        
+                        case "evolution_event":
+                            this.handleEvolutionEvent(payload);
+                            break;
+                    }
+                }
+            }
+
+            handleWelcome(payload) {
+                const { concurrent_connections, total_connection_seconds, unlocked_milestones } = payload;
+                
+                this.updateCounter(concurrent_connections);
+                this.updateTotalTime(total_connection_seconds);
+                this.elements.status.textContent = 'COLLECTIVE CONSCIOUSNESS';
+                
+                // Display existing milestones
+                if (unlocked_milestones && unlocked_milestones.length > 0) {
+                    unlocked_milestones.forEach(milestone => {
+                        this.addMilestone(milestone, false);
+                    });
+                }
+            }
+
+            handleStateUpdate(payload) {
+                const { concurrent_connections, total_connection_seconds } = payload;
+                this.updateCounter(concurrent_connections);
+                if (total_connection_seconds !== undefined) {
+                    this.updateTotalTime(total_connection_seconds);
+                }
+            }
+
+            handleEvolutionEvent(payload) {
+                const { milestone } = payload;
+                
+                // Trigger evolution flash
+                this.triggerEvolutionFlash();
+                
+                // Add milestone to display
+                this.addMilestone(milestone, true);
+                
+                // Update status temporarily
+                const originalStatus = this.elements.status.textContent;
+                this.elements.status.textContent = 'EVOLUTION EVENT';
+                setTimeout(() => {
+                    this.elements.status.textContent = originalStatus;
+                }, 3000);
+            }
+
+            updateCounter(count) {
+                this.elements.counter.textContent = count.toLocaleString();
+            }
+
+            updateTotalTime(seconds) {
+                if (seconds !== undefined && seconds !== null) {
+                    this.elements.totalTime.textContent = `Total Experience: ${seconds.toLocaleString()} seconds`;
+                }
+            }
+
+            updateConnectionStatus(status) {
+                this.elements.connectionStatus.textContent = status;
+            }
+
+            triggerEvolutionFlash() {
+                this.elements.evolutionFlash.classList.add('active');
+                setTimeout(() => {
+                    this.elements.evolutionFlash.classList.remove('active');
+                }, 1000);
+            }
+
+            addMilestone(milestone, isNew = false) {
+                const milestoneEl = document.createElement('div');
+                milestoneEl.className = 'milestone';
+                milestoneEl.innerHTML = `
+                    <strong>${milestone.name || milestone.id}</strong><br>
+                    <small>${milestone.description || `Threshold: ${milestone.threshold}`}</small>
+                `;
+                
+                if (isNew) {
+                    // Insert at the top for new milestones
+                    this.elements.milestones.insertBefore(milestoneEl, this.elements.milestones.firstChild);
+                } else {
+                    // Append for existing milestones
+                    this.elements.milestones.appendChild(milestoneEl);
+                }
+            }
+
+            scheduleReconnect() {
+                if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                    this.updateConnectionStatus('Maximum reconnection attempts reached');
+                    return;
+                }
+
+                this.reconnectAttempts++;
+                const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                
+                this.updateConnectionStatus(`Reconnecting in ${Math.ceil(delay / 1000)} seconds... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                this.elements.counter.classList.add('reconnecting');
+                
+                setTimeout(() => {
+                    this.elements.counter.classList.remove('reconnecting');
+                    this.connect();
+                }, delay);
+            }
+
+            generateRef() {
+                return Math.random().toString(36).substring(2, 15);
+            }
+        }
+
+        // Initialize The Collective client when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new CollectiveClient();
+        });
+
+        // Prevent context menu and selection to maintain the meditative experience
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('selectstart', e => e.preventDefault());
+    </script>
+</body>
+</html>

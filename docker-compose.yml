@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # Redis for global state management
+  redis:
+    image: redis:7-alpine
+    container_name: the_collective_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - collective_network
+
+  # The Collective Phoenix application
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: the_collective_app
+    ports:
+      - "4000:4000"
+    environment:
+      - MIX_ENV=prod
+      - SECRET_KEY_BASE=your_secret_key_base_change_this_in_production
+      - REDIS_URL=redis://redis:6379
+      - PHX_HOST=localhost
+      - PORT=4000
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - collective_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Commander for monitoring (development only)
+  redis_commander:
+    image: rediscommander/redis-commander:latest
+    container_name: the_collective_redis_commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - collective_network
+    profiles:
+      - dev
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  collective_network:
+    driver: bridge

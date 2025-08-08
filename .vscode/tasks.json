@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start The Collective",
+			"type": "shell",
+			"command": "mix",
+			"args": [
+				"phx.server"
+			],
+			"group": "build",
+			"isBackground": true,
+			"problemMatcher": [
+				"$elixir-mix-compile"
+			],
+			"options": {
+				"env": {
+					"MIX_ENV": "dev"
+				}
+			}
+		}
+	]
+}
