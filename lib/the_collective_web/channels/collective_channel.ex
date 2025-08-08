@@ -27,8 +27,11 @@ defmodule TheCollectiveWeb.CollectiveChannel do
       {:ok, new_count} ->
         Logger.info("Concurrent connections: #{new_count}")
         
+        # Store the connection count in socket assigns
+        socket = assign(socket, :current_connections, new_count)
+        
         # Get current global state for welcome message
-        current_state = get_current_global_state()
+        _current_state = get_current_global_state()
         
         # Schedule post-join operations to happen after the join is complete
         send(self(), {:after_join})
