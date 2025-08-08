@@ -21,6 +21,18 @@ defmodule TheCollectiveWeb.Router do
     get "/", CollectiveController, :index
   end
 
+  scope "/health", TheCollectiveWeb do
+    pipe_through :api
+    get "/live", HealthController, :live
+    get "/ready", HealthController, :ready
+  end
+
+  scope "/metrics", TheCollectiveWeb do
+    pipe_through :api
+    get "/evolution", MetricsController, :evolution
+    get "/state", MetricsController, :state
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", TheCollectiveWeb do
   #   pipe_through :api

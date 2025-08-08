@@ -114,9 +114,20 @@ defmodule TheCollective.Redis do
     pipeline(["MULTI"] ++ commands ++ ["EXEC"])
   end
   
-  @doc """
-  Execute a Redis command using a connection from the pool.
-  """
+  # Health check ping
+  def ping do
+    case command(["PING"]) do
+      {:ok, "PONG"} -> :ok
+      {:ok, _} -> {:error, :unexpected_pong}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  
+  # Set cardinality (for fast counts)
+  def scard(key) do
+    command(["SCARD", key])
+  end
+  
   def command(command) do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
     connection_name = :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
@@ -130,6 +141,7 @@ defmodule TheCollective.Redis do
     end
   end
   
+  # Execute multiple Redis commands in a pipeline (private)
   defp pipeline(commands) do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
     connection_name = :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
