@@ -108,7 +108,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
         {:ok, negative} ->
           # Clamp to zero on underflow
           Redis.set("global:concurrent_connections", "0")
-          Logger.warn("Connection count went negative (#{inspect(negative)}), reset to 0")
+          Logger.warning("Connection count went negative (#{inspect(negative)}), reset to 0")
         {:error, reason} ->
           Logger.error("Failed to decrement connections counter: #{inspect(reason)}")
       end
