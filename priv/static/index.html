@@ -131,6 +131,12 @@
             color: #444;
             font-size: 0.9rem;
         }
+
+        @media (prefers-reduced-motion: reduce) {
+            .milestone { animation: none !important; transform: none !important; }
+            .evolution-flash.active { animation: none !important; }
+            * { scroll-behavior: auto; }
+        }
     </style>
 </head>
 <body>
@@ -139,9 +145,9 @@
     <div class="peak" id="peak">Peak: --</div>
 
     <div class="container">
-        <div class="collective-counter" id="counter">---</div>
+        <div class="collective-counter" id="counter" role="status" aria-live="polite" aria-atomic="true" aria-label="Concurrent connections">---</div>
         <div class="status" id="status">COLLECTIVE AWAKENING...</div>
-        <div class="total-time" id="total-time">Total Experience: --- seconds</div>
+        <div class="total-time" id="total-time" role="status" aria-live="polite" aria-atomic="true" aria-label="Total experience">Total Experience: --- seconds</div>
     </div>
 
     <div class="connection-status" id="connection-status">
@@ -173,6 +179,10 @@
                     totalTime: document.getElementById('total-time'),
                     peak: document.getElementById('peak')
                 };
+
+                this.counterValue = 0;
+                this.counterRaf = null;
+                this.prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
                 this.connect();
             }
@@ -305,7 +315,7 @@
                     });
                 }
             }
-
+            
             handleStateUpdate(payload) {
                 const { concurrent_connections, total_connection_seconds, peak_connections } = payload;
                 this.updateCounter(concurrent_connections);
@@ -335,13 +345,62 @@
             }
 
             updateCounter(count) {
-                this.elements.counter.textContent = count.toLocaleString();
+                if (!Number.isFinite(count)) return;
+                if (this.prefersReducedMotion) {
+                    this.counterValue = count;
+                    this.elements.counter.textContent = Number(count).toLocaleString();
+                    return;
+                }
+                this.animateCounter(Number(count));
+            }
+
+            animateCounter(target) {
+                if (this.counterRaf) cancelAnimationFrame(this.counterRaf);
+                const start = this.counterValue || 0;
+                const delta = target - start;
+                if (delta === 0) return;
+                const duration = 300; // ms
+                const t0 = performance.now();
+                const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
+                const step = (now) => {
+                    const t = Math.min(1, (now - t0) / duration);
+                    const val = Math.round(start + delta * easeOutCubic(t));
+                    this.elements.counter.textContent = val.toLocaleString();
+                    if (t < 1) {
+                        this.counterRaf = requestAnimationFrame(step);
+                    } else {
+                        this.counterValue = target;
+                        this.counterRaf = null;
+                    }
+                };
+                this.counterRaf = requestAnimationFrame(step);
             }
 
             updateTotalTime(seconds) {
                 if (seconds !== undefined && seconds !== null) {
-                    this.elements.totalTime.textContent = `Total Experience: ${seconds.toLocaleString()} seconds`;
+                    this.elements.totalTime.textContent = `Total Experience: ${this.formatDuration(Number(seconds))}`;
                 }
+            }
+
+            formatDuration(totalSeconds) {
+                totalSeconds = Math.max(0, Math.floor(totalSeconds));
+                const units = [
+                    { label: 'y', seconds: 31_536_000 },
+                    { label: 'd', seconds: 86_400 },
+                    { label: 'h', seconds: 3_600 },
+                    { label: 'm', seconds: 60 },
+                    { label: 's', seconds: 1 }
+                ];
+                const parts = [];
+                for (const {label, seconds} of units) {
+                    const qty = Math.floor(totalSeconds / seconds);
+                    if (qty > 0 || (label === 's' && parts.length === 0)) {
+                        parts.push(`${qty}${label}`);
+                        totalSeconds -= qty * seconds;
+                    }
+                    if (parts.length >= 3) break; // keep it concise
+                }
+                return parts.join(' ');
             }
 
             updateConnectionStatus(status) {
@@ -385,7 +444,9 @@
                 }
 
                 this.reconnectAttempts++;
-                const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                const base = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                const jitter = Math.random() * 250;
+                const delay = base + jitter;
                 
                 this.updateConnectionStatus(`Reconnecting in ${Math.ceil(delay / 1000)} seconds... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
                 this.elements.counter.classList.add('reconnecting');

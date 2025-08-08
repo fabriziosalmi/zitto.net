@@ -27,6 +27,7 @@ The entire state of The Collective is defined by these Redis keys:
 - `global:concurrent_connections` (Integer): Current active WebSocket connections
 - `global:total_connection_seconds` (Integer): Sum of all connection time across all users
 - `global:unlocked_milestones` (Set): IDs of achieved evolution milestones
+- `global:peak_connections` (Integer): Historical max concurrent connections
 
 ## Quick Start with Docker
 
@@ -77,9 +78,10 @@ The entire state of The Collective is defined by these Redis keys:
 
 Minimal HTML5 interface with:
 - Dark theme with large counter display
-- WebSocket connection with auto-reconnect
-- Evolution event animations
-- Real-time milestone display
+- WebSocket connection with auto-reconnect + Phoenix heartbeat
+- Evolution event animations (reduced-motion friendly)
+- Real-time milestone display and peak counter
+- Smooth numeric tweening and human-readable total time
 
 ### 2. Phoenix Channel (`lib/the_collective_web/channels/collective_channel.ex`)
 
@@ -87,6 +89,7 @@ Handles all WebSocket connections:
 - Atomic Redis counter updates on join/leave
 - Broadcasts state changes to all connected souls
 - Sends welcome messages with current global state
+- Tracks `global:peak_connections`
 
 ### 3. Chronos - Time Engine (`lib/the_collective/chronos.ex`)
 
@@ -94,6 +97,7 @@ GenServer that drives evolution:
 - Ticks every 5 seconds
 - Calculates time contribution from active connections
 - Updates global time counter atomically
+- Broadcasts lightweight state updates on each tick
 - Triggers evolution milestone checks
 
 ### 4. Evolution Engine (`lib/the_collective/evolution.ex`)
@@ -101,7 +105,7 @@ GenServer that drives evolution:
 Defines and monitors milestones:
 - Concurrent connection milestones (1, 10, 100, 1K, 10K, 100K, 1M users)
 - Time-based milestones (minutes, hours, days, weeks, months, years)
-- Special compound milestones
+- Special compound milestones (e.g., sustained_thousand, peak_experience)
 - Broadcasts evolution events to all users
 
 ### 5. Redis Module (`lib/the_collective/redis.ex`)
@@ -110,7 +114,25 @@ Clean interface for Redis operations:
 - Connection pooling for high throughput
 - Atomic operations (INCR, DECR, INCRBY)
 - Set operations for milestone tracking
+- Health ping (PING) and SCARD helper
 - Fault tolerance and error handling
+
+## Operational Endpoints
+
+- Health:
+  - `GET /health/live` → liveness
+  - `GET /health/ready` → readiness (checks Redis and Chronos)
+- Metrics:
+  - `GET /metrics/state` → current global state + Chronos stats
+  - `GET /metrics/evolution` → unlocked/total milestones and progress
+
+Example:
+```bash
+curl -s localhost:4000/health/live | jq
+curl -s localhost:4000/health/ready | jq
+curl -s localhost:4000/metrics/state | jq
+curl -s localhost:4000/metrics/evolution | jq
+```
 
 ## Deployment Commands
 
@@ -192,7 +214,7 @@ docker-compose --profile dev up redis_commander
 Built-in health checks for:
 - Application HTTP endpoint
 - Redis connectivity
-- WebSocket functionality
+- WebSocket functionality (via heartbeat)
 
 ## Development
 
@@ -242,19 +264,4 @@ The Collective is an art/tech project exploring collective consciousness through
 
 ---
 
-*"In silence, we become one."* - The Collectiveo start your Phoenix server:
-
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
-
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
-
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
-
-## Learn more
-
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+*"In silence, we become one."* - The Collective
