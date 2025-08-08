@@ -130,9 +130,6 @@ defmodule TheCollective.Redis do
     end
   end
   
-  @doc """
-  Execute multiple Redis commands in a pipeline.
-  """
   defp pipeline(commands) do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
     connection_name = :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"

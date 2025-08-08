@@ -44,9 +44,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     end
   end
   
-  @doc """
-  Handle unauthorized join attempts to other topics.
-  """
+  # Handle unauthorized join attempts to other topics (no @doc to avoid duplicate for multi-clause function)
   def join(_topic, _params, _socket) do
     {:error, %{reason: "unauthorized"}}
   end
@@ -78,9 +76,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     {:noreply, socket}
   end
   
-  @doc """
-  Handle broadcasting state updates to other connected souls.
-  """
+  # Handle broadcasting state updates to other connected souls (no @doc to avoid duplicate for multi-clause function)
   def handle_info({:broadcast_state_update, state}, socket) do
     broadcast_from(socket, "state_update", %{
       concurrent_connections: state.concurrent_connections,
@@ -119,14 +115,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     :ok
   end
   
-  @doc """
-  Get the current global state from Redis.
-  
-  Returns a map containing:
-  - concurrent_connections: Current number of active WebSocket connections
-  - total_connection_seconds: Total accumulated connection time
-  - unlocked_milestones: List of achieved evolution milestones
-  """
+  # Get the current global state from Redis (private helper)
   defp get_current_global_state do
     concurrent_connections = Redis.get_int("global:concurrent_connections") || 0
     total_connection_seconds = Redis.get_int("global:total_connection_seconds") || 0
@@ -141,9 +130,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     }
   end
   
-  @doc """
-  Get the list of unlocked milestones from Redis.
-  """
+  # Get the list of unlocked milestones from Redis (private helper)
   defp get_unlocked_milestones do
     case Redis.smembers("global:unlocked_milestones") do
       {:ok, milestone_ids} ->
@@ -156,9 +143,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     end
   end
   
-  @doc """
-  Broadcast state update to all souls in the collective:lobby.
-  """
+  # Broadcast state update to all souls in the collective:lobby (private helper)
   defp broadcast_state_update(socket, state) do
     broadcast_from(socket, "state_update", %{
       concurrent_connections: state.concurrent_connections,

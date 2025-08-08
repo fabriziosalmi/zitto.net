@@ -16,9 +16,6 @@ defmodule TheCollective.Chronos do
   # Tick interval in milliseconds (5 seconds)
   @tick_interval 5_000
   
-  # Time contribution per tick in seconds
-  @time_contribution_per_tick 5
-  
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -38,9 +35,6 @@ defmodule TheCollective.Chronos do
     }}
   end
   
-  @doc """
-  Handle the periodic tick that drives The Collective's evolution.
-  """
   def handle_info(:tick, state) do
     current_time = System.system_time(:millisecond)
 
@@ -78,28 +72,15 @@ defmodule TheCollective.Chronos do
     }}
   end
   
-  @doc """
-  Handle unexpected messages.
-  """
   def handle_info(msg, state) do
     Logger.warning("Chronos received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
   
-  @doc """
-  Schedule the next tick.
-  """
   defp schedule_tick do
     Process.send_after(self(), :tick, @tick_interval)
   end
   
-  @doc """
-  Count active WebSocket connections across all nodes.
-  
-  This function uses Phoenix.PubSub to count the number of processes
-  subscribed to the "collective:lobby" topic, which represents active
-  WebSocket connections.
-  """
   defp count_active_connections do
     try do
       # Use Phoenix's presence tracking or fallback to Redis counter
@@ -112,9 +93,6 @@ defmodule TheCollective.Chronos do
     end
   end
   
-  @doc """
-  Get current statistics for monitoring.
-  """
   def get_stats do
     GenServer.call(__MODULE__, :get_stats)
   end

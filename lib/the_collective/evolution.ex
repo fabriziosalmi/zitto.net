@@ -195,16 +195,12 @@ defmodule TheCollective.Evolution do
     end)
   end
   
-  @doc """
-  Get details for a specific milestone by ID.
-  """
+  # Get details for a specific milestone by ID (public helper)
   def get_milestone_details(milestone_id) do
     Map.get(milestones(), milestone_id)
   end
   
-  @doc """
-  Get the current global state from Redis.
-  """
+  # Private helpers (no @doc to avoid warnings)
   defp get_current_state do
     %{
       concurrent_connections: Redis.get_int("global:concurrent_connections") || 0,
@@ -212,9 +208,6 @@ defmodule TheCollective.Evolution do
     }
   end
   
-  @doc """
-  Get the set of already unlocked milestone IDs.
-  """
   defp get_unlocked_milestone_ids do
     case Redis.smembers("global:unlocked_milestones") do
       {:ok, milestone_ids} when is_list(milestone_ids) -> MapSet.new(milestone_ids)
@@ -222,9 +215,6 @@ defmodule TheCollective.Evolution do
     end
   end
   
-  @doc """
-  Check if a milestone has been reached based on current state.
-  """
   defp milestone_reached?(%{type: :concurrent, threshold: threshold}, state) do
     state.concurrent_connections >= threshold
   end
@@ -237,9 +227,6 @@ defmodule TheCollective.Evolution do
     check_fn.(state)
   end
   
-  @doc """
-  Unlock a milestone and broadcast the evolution event.
-  """
   defp unlock_milestone(milestone) do
     Logger.info("EVOLUTION EVENT: #{milestone.name || milestone.id}")
 
@@ -254,22 +241,12 @@ defmodule TheCollective.Evolution do
     end
   end
   
-  @doc """
-  Special check for sustained thousand milestone.
-  
-  This checks if 1000+ connections have been maintained for at least an hour.
-  """
   defp check_sustained_thousand(state) do
     # This is a simplified check - in production you might want to track
     # the duration of high connection counts more precisely
     state.concurrent_connections >= 1000 and state.total_connection_seconds >= 3_600
   end
   
-  @doc """
-  Special check for peak experience milestone.
-  
-  This could track new records in maximum concurrent connections.
-  """
   defp check_peak_experience(state) do
     # Get the stored peak from Redis
     current_peak = Redis.get_int("global:peak_connections") || 0
