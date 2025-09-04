@@ -7,7 +7,9 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
-    curl
+    curl \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
 
 # Set build ENV
 ENV MIX_ENV=prod
@@ -55,11 +57,14 @@ RUN apk add --no-cache \
     libstdc++ \
     openssl \
     ncurses-libs \
-    curl
+    curl \
+    ca-certificates \
+    tini \
+    && rm -rf /var/cache/apk/*
 
-# Create app user
+# Create app user with specific UID/GID and no shell
 RUN addgroup -g 1000 -S phoenix && \
-    adduser -u 1000 -S phoenix -G phoenix
+    adduser -u 1000 -S phoenix -G phoenix -s /sbin/nologin
 
 # Create app directory
 WORKDIR /app
@@ -73,21 +78,27 @@ USER phoenix
 # Copy the release from builder stage
 COPY --from=builder --chown=phoenix:phoenix /app/_build/prod/rel/the_collective ./
 
-# Create directories for logs and tmp
-RUN mkdir -p /tmp /app/log
+# Create directories for logs and tmp with proper permissions
+RUN mkdir -p /tmp /app/log && \
+    chmod 750 /app/log
 
 # Expose port
 EXPOSE 4000
 
 # Set environment variables
-ENV HOME=/app
-ENV MIX_ENV=prod
-ENV SECRET_KEY_BASE=ReplaceMe
-ENV REDIS_URL=redis://redis:6379
+ENV HOME=/app \
+    MIX_ENV=prod \
+    LANG=C.UTF-8
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:4000/ || exit 1
+# Remove default SECRET_KEY_BASE to force proper configuration
+# ENV SECRET_KEY_BASE must be provided at runtime
+
+# Health check using the built-in health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:4000/health/live || exit 1
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/sbin/tini", "--"]
 
 # Start the application
 CMD ["./bin/the_collective", "start"]

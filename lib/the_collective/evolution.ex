@@ -259,6 +259,14 @@ defmodule TheCollective.Evolution do
     case Redis.sadd("global:unlocked_milestones", milestone.id) do
       {:ok, 1} ->
         Logger.info("Milestone #{milestone.id} unlocked")
+        
+        # Emit telemetry for evolution event
+        :telemetry.execute(
+          [:the_collective, :evolution_events, :total],
+          %{count: 1},
+          %{milestone_id: milestone.id, milestone_type: milestone.type}
+        )
+        
         CollectiveChannel.broadcast_evolution_event(milestone)
       {:ok, 0} ->
         Logger.debug("Milestone #{milestone.id} already unlocked (race)")

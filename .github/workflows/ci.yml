@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  ELIXIR_VERSION: '1.15'
+  OTP_VERSION: '26'
+  MIX_ENV: test
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: ${{ env.ELIXIR_VERSION }}
+        otp-version: ${{ env.OTP_VERSION }}
+
+    - name: Cache deps
+      uses: actions/cache@v4
+      with:
+        path: deps
+        key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+        restore-keys: ${{ runner.os }}-mix-
+
+    - name: Cache build
+      uses: actions/cache@v4
+      with:
+        path: _build
+        key: ${{ runner.os }}-build-${{ env.MIX_ENV }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.MIX_ENV }}-
+          ${{ runner.os }}-build-
+
+    - name: Install dependencies
+      run: mix deps.get
+
+    - name: Compile
+      run: mix compile --warnings-as-errors
+
+    - name: Run tests
+      run: mix test
+      env:
+        REDIS_URL: redis://localhost:6379
+
+    - name: Check code formatting
+      run: mix format --check-formatted
+
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: ${{ env.ELIXIR_VERSION }}
+        otp-version: ${{ env.OTP_VERSION }}
+
+    - name: Cache deps
+      uses: actions/cache@v4
+      with:
+        path: deps
+        key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+        restore-keys: ${{ runner.os }}-mix-
+
+    - name: Install dependencies
+      run: mix deps.get
+
+    - name: Run Credo (when available)
+      run: |
+        if mix help credo >/dev/null 2>&1; then
+          mix credo --strict
+        else
+          echo "Credo not available, skipping..."
+        fi
+      continue-on-error: true
+
+    - name: Check unused dependencies
+      run: mix deps.unlock --unused
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: the-collective:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        docker run --rm --name redis-test -d redis:7-alpine
+        docker run --rm \
+          --link redis-test:redis \
+          -e REDIS_URL=redis://redis:6379 \
+          -e SECRET_KEY_BASE=test_key_for_ci_only \
+          the-collective:test \
+          /bin/sh -c "mix test --no-start"
+        docker stop redis-test

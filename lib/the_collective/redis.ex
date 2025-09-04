@@ -161,11 +161,26 @@ defmodule TheCollective.Redis do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
     connection_name = select_random_connection(pool_size)
     
-    execute_redis_command(connection_name, redis_command)
+    # Add telemetry for monitoring Redis performance
+    start_time = System.monotonic_time()
+    result = execute_redis_command(connection_name, redis_command)
+    end_time = System.monotonic_time()
+    
+    # Emit telemetry event
+    :telemetry.execute(
+      [:the_collective, :redis, :command, :duration],
+      %{duration: end_time - start_time},
+      %{command: List.first(redis_command), result: elem(result, 0)}
+    )
+    
+    result
   end
 
   defp select_random_connection(pool_size) do
-    :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
+    # Use faster random selection for high-throughput scenarios
+    # :rand.uniform is faster than Enum.random for simple cases
+    connection_id = :rand.uniform(pool_size)
+    :"#{@redis_pool_name}_#{connection_id}"
   end
 
   defp execute_redis_command(connection_name, redis_command) do
@@ -173,6 +188,12 @@ defmodule TheCollective.Redis do
       Redix.command(connection_name, redis_command)
     rescue
       error ->
+        # Emit error telemetry
+        :telemetry.execute(
+          [:the_collective, :redis, :command, :errors, :total],
+          %{count: 1},
+          %{command: List.first(redis_command), error: inspect(error)}
+        )
         Logger.error("Redis command failed: #{inspect(redis_command)}, error: #{inspect(error)}")
         {:error, error}
     end

@@ -8,6 +8,7 @@
 # Node modules
 /assets/node_modules
 node_modules/
+npm-debug.log
 
 # Development files
 .elixir_ls/
@@ -33,12 +34,16 @@ docker-compose*.yml
 
 # Logs
 *.log
+erl_crash.dump
 
 # Test files
 /test
 
 # Documentation
 README.md
+CHANGELOG.md
+SECURITY.md
+*.md
 
 # Temporary files
 /tmp
@@ -48,3 +53,20 @@ README.md
 .env
 .env.local
 .env.*.local
+.env.example
+
+# IDE files
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+*.ez
+the_collective-*.tar
+
+# CI/CD
+.github/
+
+# Cache directories
+priv/static/cache_manifest.json
+priv/static/assets/
