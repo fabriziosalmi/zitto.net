@@ -22,6 +22,9 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   def join("collective:lobby", _params, socket) do
     Logger.info("Soul joining The Collective from #{inspect(socket.assigns)}")
     
+    # Register this connection with the graceful shutdown manager
+    TheCollective.GracefulShutdown.register_connection()
+    
     # Increment the concurrent connections counter atomically
     case Redis.incr("global:concurrent_connections") do
       {:ok, new_count} ->
@@ -32,6 +35,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
           socket
           |> assign(:current_connections, new_count)
           |> assign(:joined, true)
+          |> assign(:graceful_shutdown_registered, true)
         
         # Schedule post-join operations to happen after the join is complete
         send(self(), {:after_join})
@@ -88,14 +92,26 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     {:noreply, socket}
   end
   
+  # Handle graceful shutdown warning broadcast (no @doc to avoid duplicate for multi-clause function)
+  def handle_info({:shutdown_warning, message}, socket) do
+    push(socket, "shutdown_warning", message)
+    {:noreply, socket}
+  end
+  
   @doc """
   Handle channel termination.
   
   When a soul disconnects from The Collective, this function decrements
-  the global connection counter and broadcasts the updated state.
+  the global connection counter, unregisters from graceful shutdown tracking,
+  and broadcasts the updated state.
   """
   def terminate(_reason, socket) do
     Logger.info("Soul leaving The Collective")
+
+    # Unregister from graceful shutdown manager if we were registered
+    if socket.assigns[:graceful_shutdown_registered] do
+      TheCollective.GracefulShutdown.unregister_connection()
+    end
 
     if socket.assigns[:joined] do
       case Redis.decr("global:concurrent_connections") do

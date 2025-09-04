@@ -55,6 +55,14 @@ if config_env() == :prod do
   config :the_collective, :redis_url, redis_url
   config :the_collective, :redis_pool_size, 10
 
+  # Configure backpressure management for production
+  config :the_collective, :connections_per_ip_per_minute, 
+    String.to_integer(System.get_env("CONNECTIONS_PER_IP_PER_MINUTE") || "60")
+  config :the_collective, :global_connections_per_second, 
+    String.to_integer(System.get_env("GLOBAL_CONNECTIONS_PER_SECOND") || "1000")
+  config :the_collective, :max_global_connections, 
+    String.to_integer(System.get_env("MAX_GLOBAL_CONNECTIONS") || "10000000")
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
