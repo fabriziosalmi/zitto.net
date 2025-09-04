@@ -168,13 +168,18 @@ defmodule TheCollective.Evolution do
   This function is called when a new connection joins to immediately
   check for milestone achievements based on the new connection count.
   """
-  def check_milestones(concurrent_connections) do
+  def check_milestones(concurrent_connections) when is_integer(concurrent_connections) and concurrent_connections >= 0 do
     current_state = %{
       concurrent_connections: concurrent_connections,
-      total_connection_seconds: Redis.get_int("global:total_connection_seconds")
+      total_connection_seconds: Redis.get_int("global:total_connection_seconds") || 0
     }
     
     check_milestones_with_state(current_state)
+  end
+
+  def check_milestones(invalid_connections) do
+    Logger.warning("Invalid concurrent_connections value for milestone check: #{inspect(invalid_connections)}")
+    :ok
   end
   
   # Get details for a specific milestone by ID (public helper)
@@ -210,16 +215,42 @@ defmodule TheCollective.Evolution do
     end
   end
   
-  defp milestone_reached?(%{type: :concurrent, threshold: threshold}, state) do
-    state.concurrent_connections >= threshold
+  defp milestone_reached?(%{type: :concurrent, threshold: threshold}, state) 
+       when is_integer(threshold) and is_map(state) do
+    case Map.get(state, :concurrent_connections) do
+      connections when is_integer(connections) and connections >= 0 ->
+        connections >= threshold
+      _ ->
+        Logger.warning("Invalid concurrent_connections in state for milestone check: #{inspect(state)}")
+        false
+    end
   end
   
-  defp milestone_reached?(%{type: :time, threshold: threshold}, state) do
-    state.total_connection_seconds >= threshold
+  defp milestone_reached?(%{type: :time, threshold: threshold}, state) 
+       when is_integer(threshold) and is_map(state) do
+    case Map.get(state, :total_connection_seconds) do
+      seconds when is_integer(seconds) and seconds >= 0 ->
+        seconds >= threshold
+      _ ->
+        Logger.warning("Invalid total_connection_seconds in state for milestone check: #{inspect(state)}")
+        false
+    end
   end
   
-  defp milestone_reached?(%{type: :special, check_fn: check_fn}, state) do
-    check_fn.(state)
+  defp milestone_reached?(%{type: :special, check_fn: check_fn}, state) 
+       when is_function(check_fn, 1) and is_map(state) do
+    try do
+      check_fn.(state)
+    rescue
+      error ->
+        Logger.error("Error in special milestone check function: #{inspect(error)}")
+        false
+    end
+  end
+
+  defp milestone_reached?(milestone, state) do
+    Logger.warning("Invalid milestone or state format: milestone=#{inspect(milestone)}, state=#{inspect(state)}")
+    false
   end
   
   defp unlock_milestone(milestone) do

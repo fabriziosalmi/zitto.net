@@ -63,8 +63,16 @@ defmodule TheCollective.Redis do
   def get_int(key) do
     case command(["GET", key]) do
       {:ok, nil} -> nil
-      {:ok, value} -> String.to_integer(value)
-      {:error, _} -> nil
+      {:ok, value} when is_binary(value) ->
+        case Integer.parse(value) do
+          {int_value, ""} -> int_value
+          _ -> 
+            Logger.warning("Invalid integer value in Redis key #{key}: #{inspect(value)}")
+            nil
+        end
+      {:error, reason} ->
+        Logger.warning("Failed to get Redis key #{key}: #{inspect(reason)}")
+        nil
     end
   end
   
@@ -243,16 +251,45 @@ defmodule TheCollective.Redis do
     end
   end
 
-  defp parse_peak_history_data(raw_data) do
+  defp parse_peak_history_data(raw_data) when is_list(raw_data) do
     # Parse the data: ["timestamp:value", "score", ...]
-    raw_data
-    |> Enum.chunk_every(2)
-    |> Enum.map(&parse_peak_history_entry/1)
-    |> Enum.sort_by(fn {timestamp, _peak_value} -> timestamp end)
+    try do
+      raw_data
+      |> Enum.chunk_every(2)
+      |> Enum.map(&parse_peak_history_entry/1)
+      |> Enum.filter(fn {timestamp, _peak_value} -> timestamp > 0 end)
+      |> Enum.sort_by(fn {timestamp, _peak_value} -> timestamp end)
+    rescue
+      error ->
+        Logger.error("Failed to parse peak history data: #{inspect(error)}")
+        []
+    end
   end
 
-  defp parse_peak_history_entry([entry, score]) do
-    [timestamp_str, value_str] = String.split(entry, ":", parts: 2)
-    {String.to_integer(score), String.to_integer(value_str)}
+  defp parse_peak_history_data(_invalid_data) do
+    Logger.warning("Invalid peak history data received")
+    []
+  end
+
+  defp parse_peak_history_entry([entry, score]) when is_binary(entry) and is_binary(score) do
+    case String.split(entry, ":", parts: 2) do
+      [_timestamp_str, value_str] ->
+        with {timestamp, ""} <- Integer.parse(score),
+             {value, ""} <- Integer.parse(value_str) do
+          {timestamp, value}
+        else
+          _ ->
+            Logger.warning("Invalid peak history entry format: #{inspect(entry)} with score #{inspect(score)}")
+            {0, 0}
+        end
+      _ ->
+        Logger.warning("Invalid peak history entry format: #{inspect(entry)}")
+        {0, 0}
+    end
+  end
+
+  defp parse_peak_history_entry(invalid_entry) do
+    Logger.warning("Invalid peak history entry structure: #{inspect(invalid_entry)}")
+    {0, 0}
   end
 end
