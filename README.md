@@ -67,6 +67,7 @@ graph TD
 - **Anonymity and Ephemerality**: No user accounts, no personal data, no individual tracking.
 - **Silence is the Default State**: Minimal, dark UI focused on the shared experience.
 - **Evolutionary Events**: Milestones trigger simultaneous broadcasts to all connected users.
+- **Production Ready**: Built-in graceful shutdown, backpressure management, and comprehensive monitoring for massive scale deployments.
 
 ## Global State (Redis Keys)
 
@@ -166,11 +167,31 @@ Clean interface for Redis operations:
 - Health ping (PING) and SCARD helper
 - Fault tolerance and error handling
 
+### 6. Graceful Shutdown (`lib/the_collective/graceful_shutdown.ex`)
+
+Production-ready graceful shutdown system:
+- Coordinates clean termination during deployments and scaling
+- Connection tracking and registration for all WebSocket connections
+- Configurable drain timeout (15s default) before forced shutdown
+- Broadcasts shutdown warnings to connected clients
+- Redis state cleanup to prevent connection count inconsistencies
+- Integration with OTP supervision tree for coordinated shutdown
+
+### 7. Backpressure Manager (`lib/the_collective/backpressure_manager.ex`)
+
+Multi-layer protection against connection overload:
+- **Per-IP Rate Limiting**: Prevents individual IP abuse (60 connections/minute default)
+- **Global Rate Limiting**: Controls overall connection velocity (1000 connections/second default)
+- **Capacity Limits**: Enforces maximum concurrent connections (10M default)
+- **ETS-based Tracking**: Efficient in-memory rate limit storage with automatic cleanup
+- **Statistics Collection**: Tracks rejection metrics for monitoring and alerting
+
 ## Operational Endpoints
 
 - Health:
-  - `GET /health/live` → liveness
-  - `GET /health/ready` → readiness (checks Redis and Chronos)
+  - `GET /health/live` → liveness check
+  - `GET /health/ready` → readiness (checks Redis, Chronos, and graceful shutdown status)
+  - `GET /health/status` → comprehensive system status including backpressure metrics
 - Metrics:
   - `GET /metrics/state` → current global state + Chronos stats
   - `GET /metrics/evolution` → unlocked/total milestones and progress
@@ -179,6 +200,7 @@ Example:
 ```bash
 curl -s localhost:4000/health/live | jq
 curl -s localhost:4000/health/ready | jq
+curl -s localhost:4000/health/status | jq    # Comprehensive status including backpressure
 curl -s localhost:4000/metrics/state | jq
 curl -s localhost:4000/metrics/evolution | jq
 ```
@@ -195,7 +217,7 @@ The included `deploy.sh` script provides easy management:
 # Production
 ./deploy.sh prod:build     # Build Docker images
 ./deploy.sh prod:start     # Start production environment
-./deploy.sh prod:stop      # Stop production environment
+./deploy.sh prod:stop      # Stop production environment (graceful shutdown)
 ./deploy.sh prod:restart   # Restart production environment
 
 # Utilities
@@ -205,6 +227,8 @@ The included `deploy.sh` script provides easy management:
 ./deploy.sh secret         # Generate new secret key
 ./deploy.sh cleanup        # Remove all containers and data
 ```
+
+**Note**: Production deployments automatically use graceful shutdown to ensure connection counts remain accurate and active WebSocket connections are properly drained. See `GRACEFUL_SHUTDOWN_BACKPRESSURE.md` for detailed implementation documentation.
 
 ## Scaling for Millions
 
@@ -235,11 +259,17 @@ services:
 
 ### Environment Variables
 
+**Core Configuration:**
 - `REDIS_URL`: Redis connection string
 - `SECRET_KEY_BASE`: Phoenix secret key (generate with `mix phx.gen.secret`)
 - `PHX_HOST`: Public hostname
 - `PORT`: HTTP port (default: 4000)
 - `MIX_ENV`: Environment (dev/prod)
+
+**Backpressure Management (Production):**
+- `CONNECTIONS_PER_IP_PER_MINUTE`: Rate limit per IP address (default: 60)
+- `GLOBAL_CONNECTIONS_PER_SECOND`: Global connection rate limit (default: 1000)
+- `MAX_GLOBAL_CONNECTIONS`: Maximum concurrent connections (default: 10,000,000)
 
 ## Monitoring
 
@@ -264,6 +294,39 @@ Built-in health checks for:
 - Application HTTP endpoint
 - Redis connectivity
 - WebSocket functionality (via heartbeat)
+- Graceful shutdown status (whether system is accepting new connections)
+- Backpressure statistics and rate limiting status
+
+**Comprehensive Health Status** (`/health/status`):
+```json
+{
+  "timestamp": "2024-09-04T20:48:00Z",
+  "redis": {
+    "status": "ok",
+    "concurrent_connections": 1234,
+    "total_connection_seconds": 567890,
+    "peak_connections": 2000
+  },
+  "chronos": {
+    "tick_count": 1440,
+    "active_connections": 1234,
+    "uptime_ms": 7200000
+  },
+  "backpressure": {
+    "connections_rejected": 0,
+    "rate_limited_ips": 0,
+    "global_connections": 1234,
+    "config": {
+      "connections_per_ip_per_minute": 60,
+      "global_connections_per_second": 1000,
+      "max_global_connections": 10000000
+    }
+  },
+  "graceful_shutdown": {
+    "accepting_connections": true
+  }
+}
+```
 
 ## Development
 
