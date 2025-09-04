@@ -31,6 +31,7 @@ defmodule TheCollectiveWeb.Router do
     pipe_through :api
     get "/evolution", MetricsController, :evolution
     get "/state", MetricsController, :state
+    get "/peak-history", MetricsController, :peak_history
   end
 
   # Other scopes may use custom stacks.

@@ -12,6 +12,54 @@ The Collective is built for massive scale using:
 - **Real-time Communication**: Phoenix Channels over WebSockets
 - **Deployment**: Docker Compose for easy scaling and deployment
 
+### System Flow Diagram
+
+```mermaid
+graph TD
+    A[User Browser] -->|WebSocket| B[Load Balancer]
+    B --> C[Phoenix Node 1]
+    B --> D[Phoenix Node 2]
+    B --> E[Phoenix Node N]
+    
+    C -->|Atomic Operations| F[Redis Cluster]
+    D -->|Atomic Operations| F
+    E -->|Atomic Operations| F
+    
+    F --> G[global:concurrent_connections]
+    F --> H[global:total_connection_seconds]
+    F --> I[global:peak_connections]
+    F --> J[global:unlocked_milestones]
+    F --> K[global:peak_history]
+    
+    L[Chronos GenServer] -->|5s Ticks| F
+    M[Evolution Engine] -->|Milestone Checks| F
+    
+    C -->|Broadcasts| N[All Connected Users]
+    D -->|Broadcasts| N
+    E -->|Broadcasts| N
+    
+    subgraph "Horizontal Scaling"
+        C
+        D
+        E
+    end
+    
+    subgraph "Global State"
+        G
+        H
+        I
+        J
+        K
+    end
+```
+
+**Connection Flow:**
+1. User connects via WebSocket through Load Balancer
+2. Phoenix Node increments `global:concurrent_connections` atomically
+3. Chronos ticks every 5s, adding connection-seconds to global total
+4. Evolution Engine checks for milestones on state changes
+5. All state changes broadcast to every connected user in real-time
+
 ## Core Concept
 
 - **The Collective as the Player**: Users don't earn individual points. The Collective as a whole reaches evolutionary milestones.
@@ -28,6 +76,7 @@ The entire state of The Collective is defined by these Redis keys:
 - `global:total_connection_seconds` (Integer): Sum of all connection time across all users
 - `global:unlocked_milestones` (Set): IDs of achieved evolution milestones
 - `global:peak_connections` (Integer): Historical max concurrent connections
+- `global:peak_history` (Sorted Set): 24-hour history of peak connections for sparkline visualization
 
 ## Quick Start with Docker
 

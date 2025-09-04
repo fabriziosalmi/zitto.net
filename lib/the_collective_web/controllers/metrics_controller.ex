@@ -17,4 +17,9 @@ defmodule TheCollectiveWeb.MetricsController do
 
     json(conn, state)
   end
+
+  def peak_history(conn, _params) do
+    history = Redis.get_peak_history_24h()
+    json(conn, %{peak_history_24h: history})
+  end
 end
