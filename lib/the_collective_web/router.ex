@@ -25,6 +25,7 @@ defmodule TheCollectiveWeb.Router do
     pipe_through :api
     get "/live", HealthController, :live
     get "/ready", HealthController, :ready
+    get "/status", HealthController, :status
   end
 
   scope "/metrics", TheCollectiveWeb do

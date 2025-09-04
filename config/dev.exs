@@ -70,6 +70,11 @@ config :phoenix, :plug_init_mode, :runtime
 config :the_collective, :redis_url, "redis://localhost:6379"
 config :the_collective, :redis_pool_size, 5
 
+# Configure backpressure management for development (more lenient)
+config :the_collective, :connections_per_ip_per_minute, 120
+config :the_collective, :global_connections_per_second, 2000
+config :the_collective, :max_global_connections, 100_000
+
 config :phoenix_live_view,
   # Include debug annotations and locations in rendered markup.
   # Changing this configuration will require mix clean and a full recompile.

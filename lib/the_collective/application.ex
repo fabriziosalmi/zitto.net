@@ -13,6 +13,10 @@ defmodule TheCollective.Application do
       {Phoenix.PubSub, name: TheCollective.PubSub},
       # Redis connection pool for global state management
       {TheCollective.Redis, []},
+      # Graceful shutdown manager for deployment safety
+      {TheCollective.GracefulShutdown, []},
+      # Backpressure manager for connection rate limiting
+      {TheCollective.BackpressureManager, []},
       # Chronos - The time engine that drives The Collective's evolution
       {TheCollective.Chronos, []},
       # Start to serve requests, typically the last entry
