@@ -27,13 +27,13 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     
     # Increment the concurrent connections counter atomically
     case Redis.incr("global:concurrent_connections") do
-      {:ok, new_count} ->
-        Logger.info("Concurrent connections: #{new_count}")
+      {:ok, updated_connection_count} ->
+        Logger.info("Concurrent connections: #{updated_connection_count}")
         
         # Store the connection count in socket assigns and mark as joined immediately
         socket =
           socket
-          |> assign(:current_connections, new_count)
+          |> assign(:current_connections, updated_connection_count)
           |> assign(:joined, true)
           |> assign(:graceful_shutdown_registered, true)
         
@@ -65,12 +65,7 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     TheCollective.Evolution.check_milestones(socket.assigns.current_connections)
 
     # Update peak connections if a new peak is reached
-    current_peak = Redis.get_int("global:peak_connections") || 0
-    if socket.assigns.current_connections > current_peak do
-      Redis.set("global:peak_connections", socket.assigns.current_connections)
-      # Record this peak in history for sparkline visualization
-      Redis.record_peak_history(socket.assigns.current_connections)
-    end
+    update_peak_connections_if_needed(socket.assigns.current_connections)
 
     # Get the current global state and send it to the newly joined soul
     current_state = get_current_global_state()
@@ -81,14 +76,20 @@ defmodule TheCollectiveWeb.CollectiveChannel do
 
     {:noreply, socket}
   end
+
+  defp update_peak_connections_if_needed(current_connections) do
+    current_peak_connections = Redis.get_int("global:peak_connections") || 0
+    if current_connections > current_peak_connections do
+      Redis.set("global:peak_connections", current_connections)
+      # Record this peak in history for sparkline visualization
+      Redis.record_peak_history(current_connections)
+    end
+  end
   
   # Handle broadcasting state updates to other connected souls (no @doc to avoid duplicate for multi-clause function)
   def handle_info({:broadcast_state_update, state}, socket) do
-    broadcast_from(socket, "state_update", %{
-      concurrent_connections: state.concurrent_connections,
-      total_connection_seconds: state.total_connection_seconds,
-      peak_connections: state.peak_connections
-    })
+    broadcast_state_data = build_state_broadcast_data(state)
+    broadcast_from(socket, "state_update", broadcast_state_data)
     {:noreply, socket}
   end
   
@@ -115,14 +116,14 @@ defmodule TheCollectiveWeb.CollectiveChannel do
 
     if socket.assigns[:joined] do
       case Redis.decr("global:concurrent_connections") do
-        {:ok, new_count} when is_integer(new_count) and new_count >= 0 ->
-          Logger.info("Concurrent connections after departure: #{new_count}")
+        {:ok, updated_connection_count} when is_integer(updated_connection_count) and updated_connection_count >= 0 ->
+          Logger.info("Concurrent connections after departure: #{updated_connection_count}")
           current_state = get_current_global_state()
           broadcast_state_update(socket, current_state)
-        {:ok, negative} ->
+        {:ok, negative_count} ->
           # Clamp to zero on underflow
           Redis.set("global:concurrent_connections", "0")
-          Logger.warning("Connection count went negative (#{inspect(negative)}), reset to 0")
+          Logger.warning("Connection count went negative (#{inspect(negative_count)}), reset to 0")
         {:error, reason} ->
           Logger.error("Failed to decrement connections counter: #{inspect(reason)}")
       end
@@ -163,11 +164,16 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   
   # Broadcast state update to all souls in the collective:lobby (private helper)
   defp broadcast_state_update(socket, state) do
-    broadcast_from(socket, "state_update", %{
+    broadcast_state_data = build_state_broadcast_data(state)
+    broadcast_from(socket, "state_update", broadcast_state_data)
+  end
+
+  defp build_state_broadcast_data(state) do
+    %{
       concurrent_connections: state.concurrent_connections,
       total_connection_seconds: state.total_connection_seconds,
       peak_connections: state.peak_connections
-    })
+    }
   end
   
   @doc """
