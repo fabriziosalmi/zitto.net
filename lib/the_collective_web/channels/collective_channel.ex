@@ -77,13 +77,21 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     {:noreply, socket}
   end
 
-  defp update_peak_connections_if_needed(current_connections) do
+  defp update_peak_connections_if_needed(current_connections) when is_integer(current_connections) and current_connections >= 0 do
     current_peak_connections = Redis.get_int("global:peak_connections") || 0
     if current_connections > current_peak_connections do
-      Redis.set("global:peak_connections", current_connections)
-      # Record this peak in history for sparkline visualization
-      Redis.record_peak_history(current_connections)
+      case Redis.set("global:peak_connections", current_connections) do
+        {:ok, _} ->
+          # Record this peak in history for sparkline visualization
+          Redis.record_peak_history(current_connections)
+        {:error, reason} ->
+          Logger.warning("Failed to update peak connections: #{inspect(reason)}")
+      end
     end
+  end
+
+  defp update_peak_connections_if_needed(invalid_connections) do
+    Logger.warning("Invalid current_connections value for peak update: #{inspect(invalid_connections)}")
   end
   
   # Handle broadcasting state updates to other connected souls (no @doc to avoid duplicate for multi-clause function)
@@ -152,12 +160,18 @@ defmodule TheCollectiveWeb.CollectiveChannel do
   # Get the list of unlocked milestones from Redis (private helper)
   defp get_unlocked_milestones do
     case Redis.smembers("global:unlocked_milestones") do
-      {:ok, milestone_ids} ->
+      {:ok, milestone_ids} when is_list(milestone_ids) ->
         milestone_ids
+        |> Enum.filter(&is_binary/1)
         |> Enum.map(&Evolution.get_milestone_details/1)
         |> Enum.reject(&is_nil/1)
         
-      {:error, _} ->
+      {:ok, _invalid_data} ->
+        Logger.warning("Invalid milestone data format received from Redis")
+        []
+        
+      {:error, reason} ->
+        Logger.warning("Failed to get unlocked milestones: #{inspect(reason)}")
         []
     end
   end

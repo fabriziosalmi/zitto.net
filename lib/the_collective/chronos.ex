@@ -59,11 +59,17 @@ defmodule TheCollective.Chronos do
     Process.send_after(self(), :tick, @tick_interval)
   end
 
-  defp calculate_elapsed_seconds(elapsed_milliseconds) do
+  defp calculate_elapsed_seconds(elapsed_milliseconds) when is_integer(elapsed_milliseconds) and elapsed_milliseconds >= 0 do
     max(div(elapsed_milliseconds, 1000), 1)
   end
 
-  defp process_tick_contribution(active_connections, elapsed_seconds, tick_number) do
+  defp calculate_elapsed_seconds(_invalid_elapsed) do
+    Logger.warning("Invalid elapsed milliseconds value, using default")
+    1
+  end
+
+  defp process_tick_contribution(active_connections, elapsed_seconds, tick_number) 
+       when is_integer(active_connections) and is_integer(elapsed_seconds) and active_connections >= 0 do
     if active_connections > 0 do
       time_contribution = calculate_time_contribution(active_connections, elapsed_seconds)
       update_global_time_counter(time_contribution, active_connections, tick_number)
@@ -72,8 +78,19 @@ defmodule TheCollective.Chronos do
     end
   end
 
-  defp calculate_time_contribution(active_connections, elapsed_seconds) do
+  defp process_tick_contribution(active_connections, elapsed_seconds, tick_number) do
+    Logger.warning("Invalid tick contribution parameters: connections=#{inspect(active_connections)}, elapsed=#{inspect(elapsed_seconds)}, tick=#{tick_number}")
+  end
+
+  defp calculate_time_contribution(active_connections, elapsed_seconds) 
+       when is_integer(active_connections) and is_integer(elapsed_seconds) and 
+            active_connections >= 0 and elapsed_seconds >= 0 do
     active_connections * max(elapsed_seconds, div(@tick_interval, 1000))
+  end
+
+  defp calculate_time_contribution(active_connections, elapsed_seconds) do
+    Logger.warning("Invalid time contribution parameters: connections=#{inspect(active_connections)}, elapsed=#{inspect(elapsed_seconds)}")
+    0
   end
 
   defp update_global_time_counter(time_contribution, active_connections, tick_number) do
