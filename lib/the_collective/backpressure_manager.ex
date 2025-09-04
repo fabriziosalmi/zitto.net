@@ -98,23 +98,25 @@ defmodule TheCollective.BackpressureManager do
   end
   
   def handle_call({:check_connection, ip_address}, _from, state) do
-    result = 
-      with {:ok, :ip_allowed} <- check_ip_rate_limit(ip_address, state.config),
-           {:ok, :global_allowed} <- check_global_rate_limit(state.config),
-           {:ok, :capacity_available} <- check_global_capacity(state.config) do
-        {:ok, :allowed}
-      else
-        {:error, reason} -> {:error, reason}
-      end
+    result = validate_connection_request(ip_address, state.config)
     
     case result do
       {:ok, :allowed} ->
         {:reply, result, state}
       {:error, reason} ->
-        # Update rejection stats
-        new_stats = update_rejection_stats(state.stats, reason)
+        updated_stats = update_rejection_stats(state.stats, reason)
         Logger.debug("Connection rejected: #{reason}")
-        {:reply, result, %{state | stats: new_stats}}
+        {:reply, result, %{state | stats: updated_stats}}
+    end
+  end
+
+  defp validate_connection_request(ip_address, config) do
+    with {:ok, :ip_allowed} <- check_ip_rate_limit(ip_address, config),
+         {:ok, :global_allowed} <- check_global_rate_limit(config),
+         {:ok, :capacity_available} <- check_global_capacity(config) do
+      {:ok, :allowed}
+    else
+      {:error, reason} -> {:error, reason}
     end
   end
   
@@ -154,42 +156,49 @@ defmodule TheCollective.BackpressureManager do
   # Private helper functions
   
   defp check_ip_rate_limit(ip_address, config) do
-    now = System.system_time(:second)
-    minute_ago = now - 60
+    current_time = System.system_time(:second)
+    cutoff_time = current_time - 60
     
     # Get current connections for this IP in the last minute
     case :ets.lookup(:ip_rate_limits, ip_address) do
       [] ->
         {:ok, :ip_allowed}
-      [{_ip, timestamps}] ->
-        # Filter out old timestamps
-        recent_timestamps = Enum.filter(timestamps, fn ts -> ts > minute_ago end)
+      [{_ip, connection_timestamps}] ->
+        recent_connections = filter_recent_timestamps(connection_timestamps, cutoff_time)
         
-        if length(recent_timestamps) >= config.connections_per_ip_per_minute do
+        if length(recent_connections) >= config.connections_per_ip_per_minute do
           {:error, :ip_rate_limited}
         else
           {:ok, :ip_allowed}
         end
     end
   end
+
+  defp filter_recent_timestamps(timestamps, cutoff_time) do
+    Enum.filter(timestamps, fn timestamp -> timestamp > cutoff_time end)
+  end
   
   defp check_global_rate_limit(config) do
-    now = System.system_time(:second)
+    current_time = System.system_time(:second)
     
     case :ets.lookup(:global_rate_limit, :current_second) do
       [] ->
         {:ok, :global_allowed}
-      [{:current_second, {timestamp, count}}] ->
-        if timestamp == now do
-          if count >= config.global_connections_per_second do
-            {:error, :global_rate_limited}
-          else
-            {:ok, :global_allowed}
-          end
+      [{:current_second, {timestamp, connection_count}}] ->
+        if timestamp == current_time do
+          check_current_second_limit(connection_count, config)
         else
           # New second, reset counter
           {:ok, :global_allowed}
         end
+    end
+  end
+
+  defp check_current_second_limit(connection_count, config) do
+    if connection_count >= config.global_connections_per_second do
+      {:error, :global_rate_limited}
+    else
+      {:ok, :global_allowed}
     end
   end
   
@@ -209,28 +218,28 @@ defmodule TheCollective.BackpressureManager do
   end
   
   defp record_ip_connection(ip_address) do
-    now = System.system_time(:second)
+    current_time = System.system_time(:second)
     
     case :ets.lookup(:ip_rate_limits, ip_address) do
       [] ->
-        :ets.insert(:ip_rate_limits, {ip_address, [now]})
-      [{_ip, timestamps}] ->
-        updated_timestamps = [now | timestamps]
+        :ets.insert(:ip_rate_limits, {ip_address, [current_time]})
+      [{_ip, existing_timestamps}] ->
+        updated_timestamps = [current_time | existing_timestamps]
         :ets.insert(:ip_rate_limits, {ip_address, updated_timestamps})
     end
   end
   
   defp record_global_connection do
-    now = System.system_time(:second)
+    current_time = System.system_time(:second)
     
     case :ets.lookup(:global_rate_limit, :current_second) do
       [] ->
-        :ets.insert(:global_rate_limit, {:current_second, {now, 1}})
-      [{:current_second, {timestamp, count}}] ->
-        if timestamp == now do
-          :ets.insert(:global_rate_limit, {:current_second, {now, count + 1}})
+        :ets.insert(:global_rate_limit, {:current_second, {current_time, 1}})
+      [{:current_second, {timestamp, connection_count}}] ->
+        if timestamp == current_time do
+          :ets.insert(:global_rate_limit, {:current_second, {current_time, connection_count + 1}})
         else
-          :ets.insert(:global_rate_limit, {:current_second, {now, 1}})
+          :ets.insert(:global_rate_limit, {:current_second, {current_time, 1}})
         end
     end
   end
@@ -247,23 +256,30 @@ defmodule TheCollective.BackpressureManager do
   end
   
   defp cleanup_expired_entries do
-    now = System.system_time(:second)
-    minute_ago = now - 60
+    current_time = System.system_time(:second)
+    cleanup_ip_rate_limits(current_time)
+    cleanup_global_rate_limits(current_time)
+  end
+
+  defp cleanup_ip_rate_limits(current_time) do
+    cutoff_time = current_time - 60
     
     # Clean up IP rate limits
-    :ets.foldl(fn {ip, timestamps}, acc ->
-      recent_timestamps = Enum.filter(timestamps, fn ts -> ts > minute_ago end)
+    :ets.foldl(fn {ip_address, timestamps}, _accumulator ->
+      recent_timestamps = filter_recent_timestamps(timestamps, cutoff_time)
       if Enum.empty?(recent_timestamps) do
-        :ets.delete(:ip_rate_limits, ip)
+        :ets.delete(:ip_rate_limits, ip_address)
       else
-        :ets.insert(:ip_rate_limits, {ip, recent_timestamps})
+        :ets.insert(:ip_rate_limits, {ip_address, recent_timestamps})
       end
-      acc
+      nil
     end, nil, :ip_rate_limits)
-    
+  end
+
+  defp cleanup_global_rate_limits(current_time) do
     # Clean up global rate limit if it's from a previous second
     case :ets.lookup(:global_rate_limit, :current_second) do
-      [{:current_second, {timestamp, _count}}] when timestamp < now ->
+      [{:current_second, {timestamp, _connection_count}}] when timestamp < current_time ->
         :ets.delete(:global_rate_limit, :current_second)
       _ ->
         :ok

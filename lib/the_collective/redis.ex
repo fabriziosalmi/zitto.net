@@ -149,30 +149,42 @@ defmodule TheCollective.Redis do
     command(["SCARD", key])
   end
   
-  def command(command) do
+  def command(redis_command) do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
-    connection_name = :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
+    connection_name = select_random_connection(pool_size)
     
+    execute_redis_command(connection_name, redis_command)
+  end
+
+  defp select_random_connection(pool_size) do
+    :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
+  end
+
+  defp execute_redis_command(connection_name, redis_command) do
     try do
-      Redix.command(connection_name, command)
+      Redix.command(connection_name, redis_command)
     rescue
-      e ->
-        Logger.error("Redis command failed: #{inspect(command)}, error: #{inspect(e)}")
-        {:error, e}
+      error ->
+        Logger.error("Redis command failed: #{inspect(redis_command)}, error: #{inspect(error)}")
+        {:error, error}
     end
   end
   
   # Execute multiple Redis commands in a pipeline (private)
   defp pipeline(commands) do
     pool_size = Application.get_env(:the_collective, :redis_pool_size, 10)
-    connection_name = :"#{@redis_pool_name}_#{Enum.random(1..pool_size)}"
+    connection_name = select_random_connection(pool_size)
     
+    execute_redis_pipeline(connection_name, commands)
+  end
+
+  defp execute_redis_pipeline(connection_name, commands) do
     try do
       Redix.pipeline(connection_name, commands)
     rescue
-      e ->
-        Logger.error("Redis pipeline failed: #{inspect(commands)}, error: #{inspect(e)}")
-        {:error, e}
+      error ->
+        Logger.error("Redis pipeline failed: #{inspect(commands)}, error: #{inspect(error)}")
+        {:error, error}
     end
   end
   
@@ -224,17 +236,23 @@ defmodule TheCollective.Redis do
     twenty_four_hours_ago = now - (24 * 60 * 60)
     
     case zrangebyscore("global:peak_history", twenty_four_hours_ago, "+inf") do
-      {:ok, data} when is_list(data) ->
-        # Parse the data: ["timestamp:value", "score", ...]
-        data
-        |> Enum.chunk_every(2)
-        |> Enum.map(fn [entry, score] ->
-          [timestamp_str, value_str] = String.split(entry, ":", parts: 2)
-          {String.to_integer(score), String.to_integer(value_str)}
-        end)
-        |> Enum.sort_by(fn {timestamp, _} -> timestamp end)
-      
-      _ -> []
+      {:ok, raw_data} when is_list(raw_data) ->
+        parse_peak_history_data(raw_data)
+      _ -> 
+        []
     end
+  end
+
+  defp parse_peak_history_data(raw_data) do
+    # Parse the data: ["timestamp:value", "score", ...]
+    raw_data
+    |> Enum.chunk_every(2)
+    |> Enum.map(&parse_peak_history_entry/1)
+    |> Enum.sort_by(fn {timestamp, _peak_value} -> timestamp end)
+  end
+
+  defp parse_peak_history_entry([entry, score]) do
+    [timestamp_str, value_str] = String.split(entry, ":", parts: 2)
+    {String.to_integer(score), String.to_integer(value_str)}
   end
 end

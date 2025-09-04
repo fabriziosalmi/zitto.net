@@ -159,16 +159,7 @@ defmodule TheCollective.Evolution do
   """
   def check_for_evolution do
     current_state = get_current_state()
-    unlocked_milestones = get_unlocked_milestone_ids()
-
-    milestones()
-    |> Enum.each(fn {milestone_id, milestone} ->
-      if not MapSet.member?(unlocked_milestones, milestone_id) do
-        if milestone_reached?(milestone, current_state) do
-          unlock_milestone(milestone)
-        end
-      end
-    end)
+    check_milestones_with_state(current_state)
   end
   
   @doc """
@@ -183,8 +174,18 @@ defmodule TheCollective.Evolution do
       total_connection_seconds: Redis.get_int("global:total_connection_seconds")
     }
     
+    check_milestones_with_state(current_state)
+  end
+  
+  # Get details for a specific milestone by ID (public helper)
+  def get_milestone_details(milestone_id) do
+    Map.get(milestones(), milestone_id)
+  end
+  
+  # Private helpers (no @doc to avoid warnings)
+  defp check_milestones_with_state(current_state) do
     unlocked_milestones = get_unlocked_milestone_ids()
-    
+
     milestones()
     |> Enum.each(fn {milestone_id, milestone} ->
       if not MapSet.member?(unlocked_milestones, milestone_id) do
@@ -194,13 +195,7 @@ defmodule TheCollective.Evolution do
       end
     end)
   end
-  
-  # Get details for a specific milestone by ID (public helper)
-  def get_milestone_details(milestone_id) do
-    Map.get(milestones(), milestone_id)
-  end
-  
-  # Private helpers (no @doc to avoid warnings)
+
   defp get_current_state do
     %{
       concurrent_connections: Redis.get_int("global:concurrent_connections") || 0,
@@ -249,16 +244,16 @@ defmodule TheCollective.Evolution do
   
   defp check_peak_experience(state) do
     # Get the stored peak from Redis
-    current_peak = Redis.get_int("global:peak_connections") || 0
+    current_peak_connections = Redis.get_int("global:peak_connections") || 0
     
-    if state.concurrent_connections > current_peak do
+    if state.concurrent_connections > current_peak_connections do
       # Update the peak
       Redis.set("global:peak_connections", state.concurrent_connections)
       
       # Trigger milestone if this is a significant peak (every 10x increase)
-      significant_peaks = [10, 100, 1_000, 10_000, 100_000, 1_000_000]
-      Enum.any?(significant_peaks, fn peak -> 
-        state.concurrent_connections >= peak and current_peak < peak
+      significant_peak_thresholds = [10, 100, 1_000, 10_000, 100_000, 1_000_000]
+      Enum.any?(significant_peak_thresholds, fn threshold -> 
+        state.concurrent_connections >= threshold and current_peak_connections < threshold
       end)
     else
       false
