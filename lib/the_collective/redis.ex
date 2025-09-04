@@ -92,6 +92,27 @@ defmodule TheCollective.Redis do
       {:error, _} -> false
     end
   end
+
+  @doc """
+  Add a member to a Redis sorted set with a score.
+  """
+  def zadd(key, score, member) do
+    command(["ZADD", key, score, member])
+  end
+
+  @doc """
+  Get members from a sorted set within a score range.
+  """
+  def zrangebyscore(key, min_score, max_score) do
+    command(["ZRANGEBYSCORE", key, min_score, max_score, "WITHSCORES"])
+  end
+
+  @doc """
+  Remove members from a sorted set that are older than a given score.
+  """
+  def zremrangebyscore(key, min_score, max_score) do
+    command(["ZREMRANGEBYSCORE", key, min_score, max_score])
+  end
   
   @doc """
   Set a key-value pair in Redis.
@@ -180,5 +201,40 @@ defmodule TheCollective.Redis do
     end
     
     Logger.info("Global state initialized")
+  end
+
+  @doc """
+  Record a peak connection count with timestamp for historical tracking.
+  """
+  def record_peak_history(peak_count) do
+    timestamp = System.system_time(:second)
+    zadd("global:peak_history", timestamp, "#{timestamp}:#{peak_count}")
+    
+    # Clean old entries (keep only last 7 days for performance)
+    seven_days_ago = timestamp - (7 * 24 * 60 * 60)
+    zremrangebyscore("global:peak_history", "-inf", seven_days_ago)
+  end
+
+  @doc """
+  Get peak connection history for the last 24 hours.
+  Returns a list of {timestamp, peak_value} tuples.
+  """
+  def get_peak_history_24h do
+    now = System.system_time(:second)
+    twenty_four_hours_ago = now - (24 * 60 * 60)
+    
+    case zrangebyscore("global:peak_history", twenty_four_hours_ago, "+inf") do
+      {:ok, data} when is_list(data) ->
+        # Parse the data: ["timestamp:value", "score", ...]
+        data
+        |> Enum.chunk_every(2)
+        |> Enum.map(fn [entry, score] ->
+          [timestamp_str, value_str] = String.split(entry, ":", parts: 2)
+          {String.to_integer(score), String.to_integer(value_str)}
+        end)
+        |> Enum.sort_by(fn {timestamp, _} -> timestamp end)
+      
+      _ -> []
+    end
   end
 end

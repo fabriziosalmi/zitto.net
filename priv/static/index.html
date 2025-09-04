@@ -140,6 +140,31 @@
             font-size: 0.9rem;
         }
 
+        .sparkline {
+            position: absolute;
+            top: 5rem;
+            left: 2rem;
+            width: 200px;
+            height: 40px;
+        }
+
+        .sparkline svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .sparkline-path {
+            fill: none;
+            stroke: #444;
+            stroke-width: 1;
+            opacity: 0.7;
+        }
+
+        .sparkline-area {
+            fill: rgba(68, 68, 68, 0.1);
+            stroke: none;
+        }
+
         :root {
             --breath-duration: 5000ms;
             --glow: 0 0 40px rgba(255,255,255,0.04);
@@ -215,11 +240,12 @@
         }
 
         /* Smooth fade for non-essential UI on idle */
-        .milestones, .peak, .connection-status, .total-time { transition: opacity .8s ease; }
+        .milestones, .peak, .connection-status, .total-time, .sparkline { transition: opacity .8s ease; }
         body.ui-fade .milestones,
         body.ui-fade .peak,
         body.ui-fade .connection-status,
-        body.ui-fade .total-time { opacity: 0; }
+        body.ui-fade .total-time,
+        body.ui-fade .sparkline { opacity: 0; }
 
         /* Counter pulse on evolution */
         @keyframes counterPulse { 0%{ transform: scale(1); text-shadow: var(--glow);} 50%{ transform: scale(1.06); text-shadow: 0 0 60px rgba(255,255,255,0.12);} 100%{ transform: scale(1); text-shadow: var(--glow);} }
@@ -251,6 +277,13 @@
     <div class="connection-status" id="connection-status" aria-label="Connection status" title="Connecting"></div>
 
     <div class="peak" id="peak">▲ --</div>
+
+    <div class="sparkline" id="sparkline">
+        <svg viewBox="0 0 200 40" preserveAspectRatio="none">
+            <path class="sparkline-area" id="sparkline-area" d=""></path>
+            <path class="sparkline-path" id="sparkline-path" d=""></path>
+        </svg>
+    </div>
 
     <div class="milestones" id="milestones">
         <!-- Evolution events will appear here -->
@@ -292,6 +325,8 @@
                     whispers: document.getElementById('whispers'),
                     bgCanvas: document.getElementById('bg-canvas'),
                     fxCanvas: document.getElementById('fx-canvas'),
+                    sparklinePath: document.getElementById('sparkline-path'),
+                    sparklineArea: document.getElementById('sparkline-area'),
                 };
 
                 this.ctx = this.elements.bgCanvas.getContext('2d', { alpha: true });
@@ -344,6 +379,14 @@
                     fullscreen: false,
                     embers: true,    // Presence embers
                 };
+
+                // Initialize missing properties
+                this._parallax = { x: 0, y: 0 };
+                this._mouse = { x: 0, y: 0 };
+                this.meteors = [];
+                this.ripples = [];
+                this.embers = [];
+                this._visibleRealStars = [];
                 this.loadPrefs();
                 this.applyPrefsFromURL();
                 this.applyPrefs();
@@ -359,6 +402,7 @@
 
                 this.connect();
                 this.initGeolocation();
+                this.loadSparkline();
                 window.addEventListener('resize', () => {
                     this.setupCanvases();
                     if (!this.useRealSky) this.initStars();
@@ -667,6 +711,27 @@
                 for (const e of this.embers) e.o = Math.min(0.12, e.o*1.8);
             }
 
+            handleWelcome(payload) {
+                this.updateCounter(payload.concurrent_connections);
+                this.updateTotalTime(payload.total_connection_seconds);
+                this.updatePeak(payload.peak_connections);
+                this.updateBreath(payload.concurrent_connections);
+                
+                // Refresh sparkline when we get a welcome (in case peak changed)
+                setTimeout(() => this.loadSparkline(), 1000);
+                
+                if (payload.unlocked_milestones && payload.unlocked_milestones.length > 0) {
+                    this.displayMilestones(payload.unlocked_milestones);
+                }
+            }
+
+            handleStateUpdate(payload) {
+                this.updateCounter(payload.concurrent_connections);
+                this.updateTotalTime(payload.total_connection_seconds);
+                this.updatePeak(payload.peak_connections);
+                this.updateBreath(payload.concurrent_connections);
+            }
+
             updateCounter(count) {
                 if (!Number.isFinite(count)) return;
                 // Smooth counter increase animation
@@ -682,6 +747,41 @@
                 requestAnimationFrame(step);
                 // Update dynamic title
                 try { document.title = `${Number(count).toLocaleString()} — The Collective`; } catch {}
+            }
+
+            updateTotalTime(totalSeconds) {
+                if (!this.elements.totalTime) return;
+                const time = this.formatTime(totalSeconds);
+                this.elements.totalTime.textContent = time;
+            }
+
+            updatePeak(peak) {
+                if (!this.elements.peak) return;
+                this.elements.peak.textContent = `▲ ${Number(peak).toLocaleString()}`;
+            }
+
+            formatTime(seconds) {
+                if (!seconds) return '—';
+                const years = Math.floor(seconds / 31536000);
+                const days = Math.floor((seconds % 31536000) / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                
+                if (years > 0) return `${years}y ${days}d`;
+                if (days > 0) return `${days}d ${hours}h`;
+                if (hours > 0) return `${hours}h ${minutes}m`;
+                return `${minutes}m`;
+            }
+
+            displayMilestones(milestones) {
+                if (!this.elements.milestones || !milestones.length) return;
+                milestones.forEach(milestone => {
+                    const div = document.createElement('div');
+                    div.className = 'milestone new';
+                    div.innerHTML = `<strong>${milestone.name}</strong><br><small>${milestone.description}</small>`;
+                    this.elements.milestones.appendChild(div);
+                    setTimeout(() => div.classList.remove('new'), 500);
+                });
             }
 
             bindParallax() {
@@ -756,6 +856,185 @@
                     }
                 });
             }
+
+            loadPrefs() {
+                try {
+                    const stored = localStorage.getItem('collective_prefs');
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        Object.assign(this.prefs, parsed);
+                    }
+                } catch (e) {
+                    console.debug('Failed to load preferences:', e);
+                }
+            }
+
+            applyPrefsFromURL() {
+                const params = new URLSearchParams(window.location.search);
+                for (const [key, value] of params) {
+                    if (key in this.prefs) {
+                        this.prefs[key] = value === 'true' ? true : value === 'false' ? false : value;
+                    }
+                }
+            }
+
+            applyPrefs() {
+                document.body.classList.toggle('ui-fade', this.prefs.ui === 'none');
+                this.useRealSky = this.prefs.sky === 'real';
+            }
+
+            setPref(key, value) {
+                this.prefs[key] = value;
+                this.applyPrefs();
+                try {
+                    localStorage.setItem('collective_prefs', JSON.stringify(this.prefs));
+                } catch (e) {
+                    console.debug('Failed to save preferences:', e);
+                }
+            }
+
+            bindIdle() {
+                let idleTimer;
+                const resetIdle = () => {
+                    document.body.classList.remove('ui-fade');
+                    clearTimeout(idleTimer);
+                    if (this.prefs.ui !== 'none') {
+                        idleTimer = setTimeout(() => document.body.classList.add('ui-fade'), 8000);
+                    }
+                };
+                ['mousemove', 'keydown', 'click', 'touchstart'].forEach(event => {
+                    document.addEventListener(event, resetIdle, { passive: true });
+                });
+                resetIdle();
+            }
+
+            updateEmbers(dt) {
+                // Simple ember simulation for presence visualization
+                while (this.embers.length < Math.min(20, Math.max(1, Math.floor(this.counterValue / 10)))) {
+                    this.embers.push({
+                        x: Math.random() * window.innerWidth,
+                        y: Math.random() * window.innerHeight,
+                        vx: (Math.random() - 0.5) * 0.2,
+                        vy: (Math.random() - 0.5) * 0.2,
+                        o: Math.random() * 0.05,
+                        s: Math.random() * 0.5 + 0.3,
+                        life: 1
+                    });
+                }
+
+                this.embers = this.embers.filter(e => {
+                    e.x += e.vx * dt;
+                    e.y += e.vy * dt;
+                    e.life -= dt / 10000;
+                    return e.life > 0 && e.x > -10 && e.x < window.innerWidth + 10 && e.y > -10 && e.y < window.innerHeight + 10;
+                });
+            }
+
+            drawEmbers(ctx) {
+                ctx.save();
+                for (const e of this.embers) {
+                    ctx.globalAlpha = e.o * e.life;
+                    ctx.fillStyle = 'rgba(255,255,255,1)';
+                    ctx.beginPath();
+                    ctx.arc(e.x, e.y, e.s, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            setConnectionState(state, message) {
+                this.elements.connectionStatus.className = `connection-status ${state}`;
+                this.elements.connectionStatus.title = message;
+                this.elements.status.textContent = message;
+            }
+
+            dispatch(eventType, payload) {
+                document.dispatchEvent(new CustomEvent(eventType, { detail: payload }));
+            }
+
+            initGeolocation() {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        position => {
+                            this.geo.enabled = true;
+                            this.geo.lat = position.coords.latitude;
+                            this.geo.lon = position.coords.longitude;
+                            console.debug('Geolocation enabled:', this.geo.lat, this.geo.lon);
+                        },
+                        error => console.debug('Geolocation failed:', error),
+                        { timeout: 10000, maximumAge: 300000 }
+                    );
+                }
+            }
+
+            rotateWhispers() {
+                // Placeholder for whisper rotation functionality
+                // This would rotate through different meditative messages
+            }
+
+            command(name, args) {
+                switch(name) {
+                    case 'ui': this.setPref('ui', args); break;
+                    case 'sky': this.setPref('sky', args); if (args==='real') this.initGeolocation(); break;
+                    case 'motion': this.setPref('motion', args); break;
+                    case 'aura': this.setPref('aura', !!args); break;
+                    case 'milestones': this.setPref('milestones', !!args); break;
+                    case 'peak': this.setPref('peak', !!args); break;
+                    case 'time': this.setPref('time', !!args); break;
+                    case 'geometry': this.setPref('geometry', !!args); break;
+                    case 'moon': this.setPref('moon', !!args); break;
+                    case 'sound': this.setPref('sound', !!args); break;
+                    case 'fullscreen': this.toggleFullscreen(); break;
+                    case 'embers': this.setPref('embers', !!args); break;
+                }
+            }
+
+            scheduleReconnect() {
+                if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                    this.setConnectionState('disconnected', 'Connection failed');
+                    return;
+                }
+
+                this.reconnectAttempts++;
+                const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                this.setConnectionState('reconnecting', `Reconnecting in ${Math.ceil(delay/1000)}s...`);
+                
+                setTimeout(() => this.connect(), delay);
+            }
+
+            generateRef() {
+                return Math.floor(Math.random() * 1000000000).toString();
+            }
+
+            cycleUI() {
+                const modes = ['full', 'min', 'none'];
+                const current = modes.indexOf(this.prefs.ui);
+                const next = (current + 1) % modes.length;
+                this.setPref('ui', modes[next]);
+            }
+
+            onSocketOpen() {
+                console.log('WebSocket connected');
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this.startHeartbeat();
+                this.joinChannel();
+            }
+
+            onSocketClose() {
+                console.log('WebSocket disconnected');
+                this.isConnected = false;
+                this.stopHeartbeat();
+                this.setConnectionState('disconnected', 'Disconnected from The Collective');
+                this.scheduleReconnect();
+            }
+
+            stopHeartbeat() {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
+            }
             command(name, args) {
                 switch(name) {
                     case 'ui': this.setPref('ui', args); break;
@@ -815,6 +1094,52 @@
                 // Synchronize breath phase across clients using local time
                 const offset = Date.now() % duration;
                 this.elements.aura.style.animationDelay = `-${offset}ms`;
+            }
+
+            loadSparkline() {
+                // Load initial sparkline data
+                fetch('/metrics/peak-history')
+                    .then(response => response.json())
+                    .then(data => this.updateSparkline(data.peak_history_24h))
+                    .catch(error => console.debug('Sparkline load failed:', error));
+                
+                // Refresh sparkline every 5 minutes
+                setInterval(() => this.loadSparkline(), 5 * 60 * 1000);
+            }
+
+            updateSparkline(history) {
+                if (!history || history.length === 0) return;
+                
+                const width = 200;
+                const height = 40;
+                const padding = 2;
+                
+                // Extract values and find min/max
+                const values = history.map(([_, value]) => value);
+                const minValue = Math.min(...values);
+                const maxValue = Math.max(...values);
+                const range = maxValue - minValue || 1;
+                
+                // Create path data
+                const points = history.map(([timestamp, value], index) => {
+                    const x = (index / (history.length - 1)) * (width - 2 * padding) + padding;
+                    const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
+                    return [x, y];
+                });
+                
+                if (points.length > 1) {
+                    // Create smooth path
+                    let pathData = `M ${points[0][0]} ${points[0][1]}`;
+                    for (let i = 1; i < points.length; i++) {
+                        pathData += ` L ${points[i][0]} ${points[i][1]}`;
+                    }
+                    
+                    // Create area path (for fill)
+                    let areaData = pathData + ` L ${points[points.length - 1][0]} ${height - padding} L ${points[0][0]} ${height - padding} Z`;
+                    
+                    this.elements.sparklinePath.setAttribute('d', pathData);
+                    this.elements.sparklineArea.setAttribute('d', areaData);
+                }
             }
 
             connect() {

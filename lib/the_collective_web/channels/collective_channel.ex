@@ -64,6 +64,8 @@ defmodule TheCollectiveWeb.CollectiveChannel do
     current_peak = Redis.get_int("global:peak_connections") || 0
     if socket.assigns.current_connections > current_peak do
       Redis.set("global:peak_connections", socket.assigns.current_connections)
+      # Record this peak in history for sparkline visualization
+      Redis.record_peak_history(socket.assigns.current_connections)
     end
 
     # Get the current global state and send it to the newly joined soul
