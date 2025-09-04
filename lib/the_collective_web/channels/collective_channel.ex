@@ -30,6 +30,13 @@ defmodule TheCollectiveWeb.CollectiveChannel do
       {:ok, updated_connection_count} ->
         Logger.info("Concurrent connections: #{updated_connection_count}")
         
+        # Emit telemetry for connection joined
+        :telemetry.execute(
+          [:the_collective, :connections, :joined, :total],
+          %{count: 1},
+          %{total_connections: updated_connection_count}
+        )
+        
         # Store the connection count in socket assigns and mark as joined immediately
         socket =
           socket
@@ -126,6 +133,14 @@ defmodule TheCollectiveWeb.CollectiveChannel do
       case Redis.decr("global:concurrent_connections") do
         {:ok, updated_connection_count} when is_integer(updated_connection_count) and updated_connection_count >= 0 ->
           Logger.info("Concurrent connections after departure: #{updated_connection_count}")
+          
+          # Emit telemetry for connection left
+          :telemetry.execute(
+            [:the_collective, :connections, :left, :total],
+            %{count: 1},
+            %{total_connections: updated_connection_count}
+          )
+          
           current_state = get_current_global_state()
           broadcast_state_update(socket, current_state)
         {:ok, negative_count} ->

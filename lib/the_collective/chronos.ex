@@ -36,6 +36,7 @@ defmodule TheCollective.Chronos do
   end
   
   def handle_info(:tick, state) do
+    tick_start_time = System.monotonic_time()
     current_time = System.system_time(:millisecond)
     elapsed_milliseconds = current_time - state.last_tick_time
     elapsed_seconds = calculate_elapsed_seconds(elapsed_milliseconds)
@@ -43,6 +44,14 @@ defmodule TheCollective.Chronos do
 
     process_tick_contribution(active_connections, elapsed_seconds, state.tick_count + 1)
     schedule_tick()
+
+    # Emit telemetry for tick performance
+    tick_duration = System.monotonic_time() - tick_start_time
+    :telemetry.execute(
+      [:the_collective, :chronos, :tick, :duration],
+      %{duration: tick_duration},
+      %{active_connections: active_connections, tick_count: state.tick_count + 1}
+    )
 
     {:noreply, %{
       tick_count: state.tick_count + 1,
