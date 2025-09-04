@@ -76,6 +76,19 @@ defmodule TheCollectiveWeb.CollectiveChannel do
 
     {:noreply, socket}
   end
+  
+  # Handle broadcasting state updates to other connected souls (no @doc to avoid duplicate for multi-clause function)
+  def handle_info({:broadcast_state_update, state}, socket) do
+    broadcast_state_data = build_state_broadcast_data(state)
+    broadcast_from(socket, "state_update", broadcast_state_data)
+    {:noreply, socket}
+  end
+  
+  # Handle graceful shutdown warning broadcast (no @doc to avoid duplicate for multi-clause function)
+  def handle_info({:shutdown_warning, message}, socket) do
+    push(socket, "shutdown_warning", message)
+    {:noreply, socket}
+  end
 
   defp update_peak_connections_if_needed(current_connections) when is_integer(current_connections) and current_connections >= 0 do
     current_peak_connections = Redis.get_int("global:peak_connections") || 0
@@ -92,19 +105,6 @@ defmodule TheCollectiveWeb.CollectiveChannel do
 
   defp update_peak_connections_if_needed(invalid_connections) do
     Logger.warning("Invalid current_connections value for peak update: #{inspect(invalid_connections)}")
-  end
-  
-  # Handle broadcasting state updates to other connected souls (no @doc to avoid duplicate for multi-clause function)
-  def handle_info({:broadcast_state_update, state}, socket) do
-    broadcast_state_data = build_state_broadcast_data(state)
-    broadcast_from(socket, "state_update", broadcast_state_data)
-    {:noreply, socket}
-  end
-  
-  # Handle graceful shutdown warning broadcast (no @doc to avoid duplicate for multi-clause function)
-  def handle_info({:shutdown_warning, message}, socket) do
-    push(socket, "shutdown_warning", message)
-    {:noreply, socket}
   end
   
   @doc """
